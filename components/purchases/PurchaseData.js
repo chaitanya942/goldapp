@@ -512,19 +512,33 @@ export default function PurchaseData() {
         ]
         return (
           <>
-            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '14px', marginBottom: '14px' }}>
-              {primary.map(c => (
-                <div key={c.label} style={{ ...s.card, textAlign: 'center', padding: '22px 16px', marginBottom: 0 }}>
-                  <div style={{ fontSize: 'clamp(1.2rem, 2.4vw, 1.7rem)', fontWeight: 200, color: c.color, lineHeight: 1.1, letterSpacing: '-.01em' }}>{c.value}</div>
-                  <div style={{ fontSize: '.62rem', color: t.text3, letterSpacing: '.13em', textTransform: 'uppercase', marginTop: '8px' }}>{c.label}</div>
-                </div>
-              ))}
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '12px', marginBottom: '24px' }}>
+            {/* Primary KPIs — desktop: 3 big cards. Mobile: compact single-line
+                rows (label left, full value right) so the money/weight is never
+                truncated yet the block stays short. */}
+            {isMobile ? (
+              <div style={{ ...s.card, padding: '4px 14px', marginBottom: '8px' }}>
+                {primary.map((c, i) => (
+                  <div key={c.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 0', borderTop: i ? `1px solid ${t.border}55` : 'none' }}>
+                    <span style={{ fontSize: '.6rem', color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase' }}>{c.label}</span>
+                    <span style={{ fontSize: '1rem', fontWeight: 700, color: c.color, fontFamily: 'monospace' }}>{c.value}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px', marginBottom: '14px' }}>
+                {primary.map(c => (
+                  <div key={c.label} style={{ ...s.card, textAlign: 'center', padding: '22px 16px', marginBottom: 0 }}>
+                    <div style={{ fontSize: 'clamp(1.2rem, 2.4vw, 1.7rem)', fontWeight: 200, color: c.color, lineHeight: 1.1, letterSpacing: '-.01em' }}>{c.value}</div>
+                    <div style={{ fontSize: '.62rem', color: t.text3, letterSpacing: '.13em', textTransform: 'uppercase', marginTop: '8px' }}>{c.label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(4, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? '8px' : '12px', marginBottom: isMobile ? '18px' : '24px' }}>
               {secondary.map(c => (
-                <div key={c.label} style={{ ...s.card, textAlign: 'center', padding: '14px 12px', marginBottom: 0 }}>
-                  <div style={{ fontSize: '1.35rem', fontWeight: 200, color: c.color, lineHeight: 1.1 }}>{c.value}</div>
-                  <div style={{ fontSize: '.58rem', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginTop: '6px' }}>{c.label}</div>
+                <div key={c.label} style={{ ...s.card, textAlign: 'center', padding: isMobile ? '11px 4px' : '14px 12px', marginBottom: 0 }}>
+                  <div style={{ fontSize: isMobile ? '1rem' : '1.35rem', fontWeight: isMobile ? 600 : 200, color: c.color, lineHeight: 1.1, fontFamily: isMobile ? 'monospace' : 'inherit' }}>{c.value}</div>
+                  <div style={{ fontSize: isMobile ? '.48rem' : '.58rem', color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', marginTop: isMobile ? '4px' : '6px' }}>{c.label}</div>
                 </div>
               ))}
             </div>
