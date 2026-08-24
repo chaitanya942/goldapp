@@ -1693,6 +1693,63 @@ export default function ConsignmentOverview() {
             <div style={{ padding: '80px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
               {search || activeRegions.size ? 'No branches match your filter' : 'No stock at any branch'}
             </div>
+          ) : isMobile ? (
+            // MOBILE — card layout (no horizontal scroll), sticky totals + sort.
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: `${t.gold}12`, border: `1px solid ${t.gold}33`, borderRadius: 10, position: 'sticky', top: 0, zIndex: 2, backdropFilter: 'blur(6px)' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 9, color: t.text4, letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 700 }}>Σ {filtered.length} branches</div>
+                  <div style={{ fontSize: 17, color: t.gold, fontWeight: 800, fontFamily: 'monospace', lineHeight: 1.15 }}>
+                    {fmt(scopeTab === 'bangalore' ? grandGrossWt : (grandTodayWt + grandOlderWt), 2)}<span style={{ fontSize: 10 }}>g</span>
+                    <span style={{ fontSize: 11, color: t.text3, fontWeight: 600, marginLeft: 8 }}>· {(grandToday + grandOlder) || 0} bills</span>
+                  </div>
+                </div>
+                <select value={sortKey} onChange={e => { setSortKey(e.target.value); setSortDir(-1) }} aria-label="Sort branches"
+                  style={{ flexShrink: 0, background: t.card2 || t.card, border: `1px solid ${t.border2 || t.border}`, color: t.text2, borderRadius: 8, padding: '7px 8px', fontWeight: 600 }}>
+                  <option value="total_net_wt">Net Wt</option>
+                  <option value="total_bills">Bills</option>
+                  <option value="today_net_wt">Today</option>
+                  <option value="older_net_wt">Previous</option>
+                  {isOutside && <option value="oldest_age">Oldest</option>}
+                  <option value="branch_name">Name</option>
+                </select>
+              </div>
+              {filtered.map(b => {
+                const rColor = REGION_COLORS[b.region] || t.text3
+                const totalBills = (b.today_bills || 0) + (b.older_bills || 0)
+                const totalWt = scopeTab === 'bangalore' ? (b.total_gross_wt || 0) : (b.today_net_wt || 0) + (b.older_net_wt || 0)
+                const hasToday = (b.today_bills || 0) > 0, hasPending = (b.older_bills || 0) > 0
+                const ageDays = b.oldest_age_days || 0
+                const urgentTier = ageDays > 7 ? 'overdue' : ageDays > 3 ? 'watch' : null
+                const uColor = urgentTier === 'overdue' ? t.red : urgentTier === 'watch' ? t.orange : null
+                const go = () => { setConsignmentDeepLink({ branch: b.branch_name, region: b.region }); setActiveNav('consignment-data') }
+                return (
+                  <div key={b.branch_name} onClick={go}
+                    style={{ background: t.card, border: `1px solid ${t.border}`, borderLeft: `3px solid ${uColor || rColor}`, borderRadius: 10, padding: '11px 13px', cursor: 'pointer' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: t.text1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</div>
+                        <div style={{ fontSize: 10.5, color: rColor, marginTop: 1 }}>{b.region}{b.pickup_time ? ` · ⏱ ${b.pickup_time}` : ''}</div>
+                      </div>
+                      {urgentTier && <span style={{ flexShrink: 0, fontSize: 9.5, color: uColor, background: `${uColor}18`, borderRadius: 5, padding: '2px 7px', fontWeight: 800, textTransform: 'uppercase' }}>{urgentTier === 'overdue' ? `${ageDays}d` : 'watch'}</span>}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginTop: 8 }}>
+                      <span style={{ fontSize: 18, fontWeight: 800, color: t.gold, fontFamily: 'monospace' }}>{fmt(totalWt, 2)}<span style={{ fontSize: 11 }}>g</span></span>
+                      <span style={{ fontSize: 12, color: t.text4 }}>·</span>
+                      <span style={{ fontSize: 13, color: t.text2, fontWeight: 700 }}>{totalBills} bill{totalBills === 1 ? '' : 's'}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 7, fontSize: 11, flexWrap: 'wrap' }}>
+                      <span style={{ color: hasToday ? t.blue : t.text4 }}>Today <b style={{ fontFamily: 'monospace' }}>{hasToday ? `${b.today_bills} · ${fmt(scopeTab === 'bangalore' ? (b.total_gross_wt || 0) : (b.today_net_wt || 0), 1)}g` : '—'}</b></span>
+                      {isOutside && <span style={{ color: hasPending ? t.orange : t.text4 }}>Prev <b style={{ fontFamily: 'monospace' }}>{hasPending ? `${b.older_bills} · ${fmt(b.older_net_wt, 1)}g` : '—'}</b></span>}
+                      {isOutside && b.last_moved_days_ago != null && <span style={{ color: t.text4, marginLeft: 'auto' }}>moved {b.last_moved_days_ago}d ago</span>}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 9 }}>
+                      <span style={{ fontSize: 11.5, fontWeight: 800, color: t.gold, background: `${t.gold}15`, border: `1px solid ${t.gold}40`, borderRadius: 8, padding: '7px 13px' }}>Move stock →</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
