@@ -591,8 +591,44 @@ export default function ConsignmentData() {
   // Open the EWB preview modal — fetches the exact payload that WOULD be sent
   // to NIC (no NIC call yet). Ops verifies from/to/qty/value match the
   // voucher/challan before clicking Generate.
+  // ── "Pre-clicked" workflow ──────────────────────────────────────────────
+  // Ops should only need to click Generate EWB / E-Invoice, then Send Mail.
+  // The Consignee Report and the Voucher/Challan are prerequisite workflow
+  // steps the server gate (lib/workflowGate) and the email packet both require,
+  // so if ops jumps straight to the GST step we silently run those two
+  // generators first. They stamp their _generated_at timestamps; the PDFs
+  // themselves are regenerated on demand at view/save/email time (nothing is
+  // stored), so this only "pre-clicks" the steps — no wasted work. Sequential
+  // because the Challan/Voucher gate requires the Report to be done first.
+  async function ensurePrereqDocs(c) {
+    const isInternal = c.movement_type === 'INTERNAL'
+    const errOf = async (r, fallback) => { let m = fallback; try { const j = await r.json(); m = j.error || m } catch {} return m }
+    try {
+      if (!c.consignee_report_generated_at) {
+        const r = await authedFetch(`/api/generate-consignee-report?id=${c.id}`)
+        if (!r.ok) throw new Error(await errOf(r, 'Consignee Report'))
+        await r.blob().catch(() => {})
+      }
+      if (!(c.issue_voucher_generated_at || c.delivery_challan_generated_at)) {
+        const url = isInternal ? `/api/generate-issue-voucher-pdf?id=${c.id}` : `/api/generate-challan-pdf?id=${c.id}`
+        const r = await authedFetch(url)
+        if (!r.ok) throw new Error(await errOf(r, isInternal ? 'Issue Voucher' : 'Delivery Challan'))
+        await r.blob().catch(() => {})
+      }
+      return { ok: true }
+    } catch (e) {
+      return { ok: false, error: e.message }
+    }
+  }
+
   async function openEwbPreview(c) {
     setEwbModal({ c, loading: true, data: null, audit: null, error: null, generating: false })
+    // Auto-run Report + Challan/Voucher so ops skips those two clicks.
+    const pre = await ensurePrereqDocs(c)
+    if (!pre.ok) {
+      setEwbModal(m => (m && m.c.id === c.id ? { ...m, loading: false, error: `Couldn't prepare the documents — ${pre.error}` } : m))
+      return
+    }
     try {
       // Preview + cross-doc audit in parallel — same as the accounts screen,
       // so the shared PreviewModal can render the consistency panel too.
@@ -618,6 +654,12 @@ export default function ConsignmentData() {
   // PreviewModal renders fine without it.
   async function openEinvoicePreview(c) {
     setEinvoiceModal({ c, loading: true, data: null, audit: null, error: null, generating: false })
+    // Auto-run Report + Challan/Voucher so ops skips those two clicks.
+    const pre = await ensurePrereqDocs(c)
+    if (!pre.ok) {
+      setEinvoiceModal(m => (m && m.c.id === c.id ? { ...m, loading: false, error: `Couldn't prepare the documents — ${pre.error}` } : m))
+      return
+    }
     try {
       const [pr, ar] = await Promise.all([
         authedFetch(`/api/e-invoice/preview?id=${c.id}`),
@@ -1543,9 +1585,11 @@ export default function ConsignmentData() {
                             ) : gst.kind === 'dash' ? (
                               <span title="Unavailable — consignment is rejected or cancelled" style={{ fontSize: '10px', color: t.text4, fontStyle: 'italic', padding: '0 6px' }}>—</span>
                             ) : gst.kind === 'gen' ? (
-                              step({ label: docDone ? gst.label : `🔒 ${gst.short}`, tone: docDone ? gst.tone : TONE.locked,
-                                onClick: docDone ? gst.act : undefined, disabled: !!downloadingId || !docDone,
-                                title: docDone ? 'Preview & generate on the portal' : 'Finish the Voucher / Challan first' })
+                              // Always clickable — the Report + Voucher/Challan run
+                              // automatically when this is opened (see ensurePrereqDocs).
+                              step({ label: gst.label, tone: gst.tone,
+                                onClick: gst.act, disabled: !!downloadingId,
+                                title: 'Preview & generate on the portal — Report & Voucher/Challan run automatically' })
                             ) : gst.kind === 'lockedpdf' ? (
                               step({ label: `✓ ${gst.short}`, tone: TONE.donePurple, disabled: true, title: 'PDF finalising — refresh in a moment' })
                             ) : (
