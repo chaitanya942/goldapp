@@ -541,6 +541,7 @@ export default function ConsignmentOverview() {
   // so the alert lands even when the tab is in the background.
   const pickupLogRef = useRef({})
   const [pickupNotifs, setPickupNotifs] = useState([])
+  const [pickupExpanded, setPickupExpanded] = useState(false)   // mobile toast expand/collapse
   const autoDismissRef = useRef(new Set())  // 30-min heads-ups already scheduled to auto-dismiss
   useEffect(() => {
     try { pickupLogRef.current = JSON.parse(window.localStorage.getItem(`pickup-notif-${istToday()}`) || '{}') } catch {}
@@ -1112,6 +1113,60 @@ export default function ConsignmentOverview() {
            30-min heads-up + 15-min "no consignment yet" reminder.
            Each card shows branch · net weight · pickup time. */}
       {typeof document !== 'undefined' && pickupNotifs.length > 0 && createPortal((
+        isMobile ? (() => {
+          // MOBILE — one compact, non-blocking toast: collapsed shows a count
+          // badge; tap to expand a slim scrollable list. Never covers the app.
+          const anyUrgent = pickupNotifs.some(n => n.kind === '15min')
+          const accent = anyUrgent ? t.red : t.orange
+          const count = pickupNotifs.length
+          return (
+            <div style={{ position: 'fixed', top: 'calc(env(safe-area-inset-top) + 58px)', left: 10, right: 10, zIndex: 3000, pointerEvents: 'none' }}>
+              <div data-cnspu style={{
+                pointerEvents: 'auto', background: t.card, border: `1px solid ${accent}44`,
+                borderRadius: 13, boxShadow: '0 10px 30px rgba(0,0,0,.30)', overflow: 'hidden',
+                animation: 'cnsPickupPopIn .34s cubic-bezier(.34,1.2,.64,1)',
+              }}>
+                {/* header — tap to expand/collapse */}
+                <div data-cnspu onClick={() => setPickupExpanded(x => !x)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 10px 11px 13px', cursor: 'pointer', borderLeft: `3px solid ${accent}` }}>
+                  <span style={{ flexShrink: 0, width: 30, height: 30, borderRadius: '50%', background: `${accent}1f`, color: accent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, animation: anyUrgent ? 'cnsBellShake 1.8s ease-in-out infinite' : 'none' }}>{anyUrgent ? '⚠' : '⏰'}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 800, color: t.text1, letterSpacing: '-.01em' }}>{count} pickup{count > 1 ? 's' : ''} approaching</div>
+                    <div style={{ fontSize: 10.5, color: t.text3, marginTop: 1 }}>{anyUrgent ? 'Move stock before pickup' : 'Tap to review'}</div>
+                  </div>
+                  <span style={{ flexShrink: 0, fontSize: 11, color: t.text4, transform: pickupExpanded ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>▾</span>
+                  <button onClick={(e) => { e.stopPropagation(); setPickupNotifs([]) }} title="Dismiss all"
+                    style={{ flexShrink: 0, background: 'none', border: 'none', color: t.text4, cursor: 'pointer', fontSize: 20, lineHeight: 1, padding: 0, width: 34, height: 34 }}>×</button>
+                </div>
+                {/* expanded list — slim rows, scrollable, capped height */}
+                {pickupExpanded && (
+                  <div style={{ maxHeight: '44vh', overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                    {pickupNotifs.map(n => {
+                      const urgent = n.kind === '15min'
+                      const a = urgent ? t.red : t.orange
+                      const goMove = () => { setConsignmentDeepLink({ branch: n.branch, region: n.region }); setActiveNav('consignment-data'); dismissNotif(n.id) }
+                      return (
+                        <div key={n.id} data-cnspu style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '10px 10px 10px 13px', borderTop: `1px solid ${t.border}` }}>
+                          <div style={{ flex: 1, minWidth: 0 }} onClick={goMove}>
+                            <div style={{ fontSize: 13, fontWeight: 800, color: t.text1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{n.branch}</div>
+                            <div style={{ fontSize: 11, color: t.text3, marginTop: 2, display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                              <span style={{ color: t.gold, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{n.netWt.toFixed(2)} g</span>
+                              <span style={{ color: t.text4 }}>·</span>
+                              <span style={{ fontVariantNumeric: 'tabular-nums' }}>pickup {n.pickup_time}</span>
+                              {urgent && <><span style={{ color: t.text4 }}>·</span><span style={{ color: a, fontWeight: 700 }}>now</span></>}
+                            </div>
+                          </div>
+                          <button onClick={goMove} style={{ flexShrink: 0, background: a, color: '#fff', border: 'none', borderRadius: 8, padding: '8px 12px', fontSize: 11.5, fontWeight: 800, cursor: 'pointer', minHeight: 36, whiteSpace: 'nowrap' }}>Move →</button>
+                          <button onClick={() => dismissNotif(n.id)} title="Dismiss" style={{ flexShrink: 0, background: 'none', border: 'none', color: t.text4, cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 0, width: 30, height: 30 }}>×</button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })() : (
         <div style={{
           position: 'fixed', top: 72, right: 18, zIndex: 3000,
           display: 'flex', flexDirection: 'column', gap: 10,
@@ -1197,6 +1252,7 @@ export default function ConsignmentOverview() {
             )
           })}
         </div>
+        )
       ), document.body)}
 
       <style>{`
