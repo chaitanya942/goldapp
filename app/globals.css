@@ -53,6 +53,13 @@ input, select, textarea, button {
 
 button { cursor: pointer; }
 
+/* ── Mobile foundation: consistent, responsive touch behaviour app-wide ──── */
+/* Kill the grey/blue tap flash on every control. */
+* { -webkit-tap-highlight-color: transparent; }
+/* Remove the 300 ms tap delay + disable double-tap-zoom on interactive
+   elements so taps feel instant (buttons, links, tabs, cards). */
+button, a, [role="button"], summary, label { touch-action: manipulation; }
+
 /* ── Recharts: kill all white boxes ─────────────────────────────────── */
 .recharts-surface,
 .recharts-wrapper { background: transparent !important; --recharts-background-color: transparent; }
@@ -85,6 +92,27 @@ svg.recharts-surface { pointer-events: none !important; }
 /* ── Mobile responsive ─────────────────────────────────────────── */
 
 @media (max-width: 767px) {
+  /* Never let the page scroll sideways; the app scroller handles vertical. */
+  body { overflow-x: hidden; }
+
+  /* Prevent iOS zoom-on-focus — any form control under 16px makes Safari
+     zoom the whole page. Forcing 16px kills the zoom AND gives every input a
+     more comfortable touch target across the whole app. */
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  /* Comfortable minimum tap target for the app scaffolding controls (tabs,
+     nav, filter chips). Scoped to opt-in classes so tiny inline icon buttons
+     are never forced taller. */
+  .touch-target,
+  [data-touch] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
   /* LiveFeed hero: wrap only on narrow screens — desktop keeps a single row
      (the inline flexWrap:nowrap + overflowX:auto drives a horizontal scroll
      instead of dropping the "Yet to purchase" group onto a second row). */

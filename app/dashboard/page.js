@@ -283,7 +283,9 @@ function DashboardShell() {
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
         <Topbar onMenuToggle={() => setSidebarOpen(o => !o)} isMobile={isMobile} />
-        <main style={{ flex: 1, overflowY: 'auto', overflowX: 'clip', paddingBottom: isMobile ? 60 : 0 }}>
+        <main style={{ flex: 1, overflowY: 'auto', overflowX: 'clip',
+          paddingBottom: isMobile ? 'calc(64px + env(safe-area-inset-bottom) + 12px)' : 0,
+          WebkitOverflowScrolling: 'touch', overscrollBehaviorY: 'contain' }}>
           <StuckBookingsBanner />
           <AtRiskBookingsBanner />
           <div key={activeNav} className="page-enter">{renderPage()}</div>
