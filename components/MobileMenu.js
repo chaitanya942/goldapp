@@ -50,9 +50,9 @@ export default function MobileMenu({ onClose, initialModuleId = null }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 70, display: 'flex', flexDirection: 'column' }}>
-      <div onClick={onClose} style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.65)' }} />
+      <div onClick={onClose} className="mm-backdrop" style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.62)', backdropFilter: 'blur(2px)', animation: 'mmFade .22s ease both' }} />
 
-      <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: t.bg, borderRadius: '20px 20px 0 0', borderTop: `1px solid ${t.border}`, maxHeight: '88vh', display: 'flex', flexDirection: 'column', animation: 'slideUp .25s cubic-bezier(.4,0,.2,1) both' }}>
+      <div className="mm-sheet" style={{ position: 'absolute', bottom: 0, left: 0, right: 0, background: t.bg, borderRadius: '22px 22px 0 0', borderTop: `1px solid ${t.border}`, maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 -12px 40px rgba(0,0,0,.4)', animation: 'mmSheetIn .36s cubic-bezier(.16,1,.3,1) both' }}>
 
         <div style={{ padding: '12px 0 0', display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
           <div style={{ width: 36, height: 4, borderRadius: 2, background: t.text4 }} />
@@ -95,14 +95,20 @@ export default function MobileMenu({ onClose, initialModuleId = null }) {
                   <div style={{ fontSize: '.7rem', color: t.text4 }}>This module will be available in a future release.</div>
                 </div>
               )}
-              {currentModule.visibleTabs.map(tab => {
+              {currentModule.visibleTabs.map((tab, i) => {
                 const isActive = activeNav === tab.id
+                const dot = tab.dot || currentModule.color
                 return (
-                  <button key={tab.id} onClick={() => handleNav(tab.id)}
-                    style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, padding: '14px 14px', borderRadius: 11, border: `1px solid ${isActive ? currentModule.color + '40' : 'transparent'}`, background: isActive ? `${currentModule.color}12` : 'transparent', cursor: 'pointer', marginBottom: 4 }}>
-                    <div style={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, background: isActive ? (tab.dot || currentModule.color) : t.text4, boxShadow: isActive ? `0 0 8px ${tab.dot || currentModule.color}` : 'none' }} />
-                    <span style={{ fontSize: '.82rem', color: isActive ? currentModule.color : t.text2, fontWeight: isActive ? 600 : 400, letterSpacing: '.01em' }}>{tab.label}</span>
-                    <svg style={{ marginLeft: 'auto' }} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={isActive ? currentModule.color : t.text4} strokeWidth="2" strokeLinecap="round"><path d="M9 18l6-6-6-6" /></svg>
+                  <button key={tab.id} onClick={() => handleNav(tab.id)} className="mm-item"
+                    style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 13, padding: '15px 14px', borderRadius: 13, border: `1px solid ${isActive ? dot + '55' : t.border}`, background: isActive ? `${dot}12` : t.card, cursor: 'pointer', marginBottom: 8, animation: 'mmItemIn .34s cubic-bezier(.16,1,.3,1) both', animationDelay: `${0.04 + i * 0.05}s` }}>
+                    <div style={{ width: 34, height: 34, borderRadius: 10, flexShrink: 0, background: `${dot}18`, border: `1px solid ${dot}33`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <div style={{ width: 9, height: 9, borderRadius: '50%', background: dot, boxShadow: isActive ? `0 0 8px ${dot}` : 'none' }} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '.86rem', color: isActive ? dot : t.text1, fontWeight: 600, letterSpacing: '.01em' }}>{tab.label}</div>
+                      {tab.desc && <div style={{ fontSize: '.62rem', color: t.text3, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tab.desc}</div>}
+                    </div>
+                    <svg style={{ flexShrink: 0 }} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={isActive ? dot : t.text4} strokeWidth="2" strokeLinecap="round"><path d="M9 18l6-6-6-6" /></svg>
                   </button>
                 )
               })}
@@ -119,12 +125,12 @@ export default function MobileMenu({ onClose, initialModuleId = null }) {
 
               <div style={{ fontSize: '.5rem', color: t.sectionClr, letterSpacing: '.18em', textTransform: 'uppercase', padding: '8px 8px 6px', fontWeight: 700 }}>Modules</div>
 
-              {modules.map(m => {
+              {modules.map((m, i) => {
                 const tabIds   = m.visibleTabs.map(x => x.id)
                 const isActive = tabIds.includes(activeNav)
                 return (
-                  <button key={m.id} onClick={() => setActiveModule(m.id)}
-                    style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, padding: '13px 14px', borderRadius: 11, border: `1px solid ${isActive ? m.color + '50' : t.border}`, background: isActive ? `${m.color}10` : t.card, cursor: 'pointer', marginBottom: 6, opacity: m.comingSoon ? 0.65 : 1 }}>
+                  <button key={m.id} onClick={() => setActiveModule(m.id)} className="mm-item"
+                    style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, padding: '13px 14px', borderRadius: 12, border: `1px solid ${isActive ? m.color + '50' : t.border}`, background: isActive ? `${m.color}10` : t.card, cursor: 'pointer', marginBottom: 7, opacity: m.comingSoon ? 0.65 : 1, animation: 'mmItemIn .34s cubic-bezier(.16,1,.3,1) both', animationDelay: `${0.03 + i * 0.04}s` }}>
                     <div style={{ width: 36, height: 36, borderRadius: 10, background: `${m.color}18`, border: `1px solid ${m.color}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 16 }}>{m.icon}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: '.82rem', color: isActive ? m.color : t.text1, fontWeight: 600 }}>{m.label}</div>
@@ -167,7 +173,14 @@ export default function MobileMenu({ onClose, initialModuleId = null }) {
         )}
       </div>
 
-      <style>{`@keyframes slideUp { from { transform: translateY(100%) } to { transform: translateY(0) } }`}</style>
+      <style>{`
+        @keyframes mmSheetIn { from { transform: translateY(100%) } to { transform: translateY(0) } }
+        @keyframes mmFade    { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes mmItemIn  { from { opacity: 0; transform: translateY(9px) } to { opacity: 1; transform: none } }
+        @media (prefers-reduced-motion: reduce) {
+          .mm-sheet, .mm-backdrop, .mm-item { animation: none !important; }
+        }
+      `}</style>
     </div>
   )
 }
