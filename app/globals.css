@@ -60,6 +60,13 @@ button { cursor: pointer; }
    elements so taps feel instant (buttons, links, tabs, cards). */
 button, a, [role="button"], summary, label { touch-action: manipulation; }
 
+/* Horizontal-scroll strip for filter/chip rows on mobile: children keep their
+   size and the row swipes instead of stacking into a tall wall. Harmless on
+   desktop (the container there keeps flex-wrap via its own inline style). */
+.hstrip { -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.hstrip::-webkit-scrollbar { display: none; }
+.hstrip > * { flex-shrink: 0; }
+
 /* ── Recharts: kill all white boxes ─────────────────────────────────── */
 .recharts-surface,
 .recharts-wrapper { background: transparent !important; --recharts-background-color: transparent; }

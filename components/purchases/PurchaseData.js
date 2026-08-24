@@ -532,8 +532,15 @@ export default function PurchaseData() {
         )
       })()}
 
-      {/* FILTER CHIPS — CRM source · status · quick dates, condensed to one row */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* FILTER CHIPS — CRM source · status · quick dates. On mobile this is a
+          single horizontal-scroll strip (swipe) instead of a tall wrapped wall. */}
+      <div className={isMobile ? 'hstrip' : undefined} style={{
+        display: 'flex', gap: '8px', alignItems: 'center',
+        flexWrap: isMobile ? 'nowrap' : 'wrap',
+        overflowX: isMobile ? 'auto' : 'visible',
+        marginBottom: '16px',
+        ...(isMobile ? { margin: '0 -16px 14px', padding: '0 16px' } : {}),
+      }}>
         {[
           { key: '',        label: 'All Sources' },
           { key: 'old_crm', label: 'Old CRM' },
@@ -645,22 +652,26 @@ export default function PurchaseData() {
       </div>
 
       {/* PAGINATION INFO */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '12px', marginBottom: '12px', fontSize: '.7rem', color: t.text3 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '10px', marginBottom: '12px', fontSize: '.7rem', color: t.text3, flexWrap: 'wrap' }}>
         {hasLiveUpdate && (
           <button onClick={load}
-            style={{ marginRight: 'auto', display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 12px', borderRadius: '100px', cursor: 'pointer', border: `1px solid ${t.green}66`, background: `${t.green}1a`, color: t.green, fontSize: '.66rem', fontWeight: 600, letterSpacing: '.02em' }}>
+            style={{ marginRight: 'auto', display: 'flex', alignItems: 'center', gap: '6px', padding: isMobile ? '7px 14px' : '4px 12px', borderRadius: '100px', cursor: 'pointer', border: `1px solid ${t.green}66`, background: `${t.green}1a`, color: t.green, fontSize: '.66rem', fontWeight: 600, letterSpacing: '.02em' }}>
             <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: t.green }} />
-            New data synced — refresh
+            {isMobile ? 'New data — refresh' : 'New data synced — refresh'}
           </button>
         )}
         {selectedIds.size > 0 && <span style={{ color: t.gold }}>{selectedIds.size} selected</span>}
-        <span>Showing {totalCount === 0 ? 0 : page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalCount).toLocaleString('en-IN')} of {totalCount.toLocaleString('en-IN')} records</span>
+        <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+          {isMobile
+            ? <>{(totalCount === 0 ? 0 : page * PAGE_SIZE + 1)}–{Math.min((page + 1) * PAGE_SIZE, totalCount).toLocaleString('en-IN')} / {totalCount.toLocaleString('en-IN')}</>
+            : <>Showing {totalCount === 0 ? 0 : page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalCount).toLocaleString('en-IN')} of {totalCount.toLocaleString('en-IN')} records</>}
+        </span>
         <span style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
           <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
-            style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: '5px', padding: '3px 10px', color: page === 0 ? t.text4 : t.text2, cursor: page === 0 ? 'not-allowed' : 'pointer', fontSize: '.7rem' }}>←</button>
-          <span>Page {page + 1} of {totalPages || 1}</span>
+            style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: '7px', padding: isMobile ? '8px 16px' : '3px 10px', color: page === 0 ? t.text4 : t.text2, cursor: page === 0 ? 'not-allowed' : 'pointer', fontSize: '.8rem', fontWeight: 700 }}>←</button>
+          <span style={{ minWidth: 74, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>Page {page + 1}/{totalPages || 1}</span>
           <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
-            style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: '5px', padding: '3px 10px', color: page >= totalPages - 1 ? t.text4 : t.text2, cursor: page >= totalPages - 1 ? 'not-allowed' : 'pointer', fontSize: '.7rem' }}>→</button>
+            style={{ background: 'none', border: `1px solid ${t.border}`, borderRadius: '7px', padding: isMobile ? '8px 16px' : '3px 10px', color: page >= totalPages - 1 ? t.text4 : t.text2, cursor: page >= totalPages - 1 ? 'not-allowed' : 'pointer', fontSize: '.8rem', fontWeight: 700 }}>→</button>
         </span>
       </div>
 
