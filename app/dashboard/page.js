@@ -43,6 +43,7 @@ import AtRiskBookingsBanner from '../../components/bidding/AtRiskBookingsBanner'
 import StuckBookingsBanner from '../../components/bidding/StuckBookingsBanner'
 import CalTable from '../../components/sales/CalTable'
 import LiveMarketRates from '../../components/sales/LiveMarketRates'
+import GoldNews from '../../components/sales/GoldNews'
 import InboundBotTesting from '../../components/telesales/InboundBotTesting'
 import TelesalesDashboard from '../../components/telesales/TelesalesDashboard'
 import DialogHost from '../../components/ui/ConfirmDialog'
@@ -259,6 +260,7 @@ function DashboardShell() {
       case 'sales':               return <ComingSoon title="Sales" />
       case 'cal-table':           return <CalTable />
       case 'live-market-rates':   return <LiveMarketRates />
+      case 'gold-news':           return <GoldNews />
       case 'reports':             return <ComingSoon title="Reports" />
       case 'branch-management':   return <Branches />
       case 'user-management':     return <UserManagement />

@@ -8,9 +8,9 @@ import { openAlert } from '../ui/ConfirmDialog'
 
 // ── Local role defaults ────────────────────────────────────────────────────────
 const _ROLE_PAGES = {
-  super_admin:     ['dashboard','purchase-data','purchase-reports','consignment-overview','consignment-data','consignment-report','consignment-summary','melting','sales','cal-table','live-market-rates','reports','branch-management','branch-employees','user-management','company-settings','consignment-seeds','import-logs','inbound-bot','gold-buying-rate'],
-  founders_office: ['dashboard','purchase-data','purchase-reports','consignment-overview','consignment-data','consignment-report','consignment-summary','melting','sales','cal-table','live-market-rates','reports','branch-management','branch-employees','user-management','company-settings','consignment-seeds','import-logs','inbound-bot','gold-buying-rate'],
-  admin:           ['dashboard','purchase-data','purchase-reports','consignment-overview','consignment-data','consignment-report','consignment-summary','cal-table','live-market-rates'],
+  super_admin:     ['dashboard','purchase-data','purchase-reports','consignment-overview','consignment-data','consignment-report','consignment-summary','melting','sales','cal-table','live-market-rates','gold-news','reports','branch-management','branch-employees','user-management','company-settings','consignment-seeds','import-logs','inbound-bot','gold-buying-rate'],
+  founders_office: ['dashboard','purchase-data','purchase-reports','consignment-overview','consignment-data','consignment-report','consignment-summary','melting','sales','cal-table','live-market-rates','gold-news','reports','branch-management','branch-employees','user-management','company-settings','consignment-seeds','import-logs','inbound-bot','gold-buying-rate'],
+  admin:           ['dashboard','purchase-data','purchase-reports','consignment-overview','consignment-data','consignment-report','consignment-summary','cal-table','live-market-rates','gold-news'],
   manager:         ['dashboard','purchase-data','purchase-reports','live-market-rates'],
   branch_staff:    ['dashboard','purchase-data','purchase-reports'],
   viewer:          ['dashboard','purchase-reports'],
@@ -134,6 +134,7 @@ const PERM_TREE = [
     children: [
       { key: 'page.cal-table',         label: 'Cal Table',         desc: 'Sales calculation and pricing table' },
       { key: 'page.live-market-rates', label: 'Live Market Rates', desc: 'Real-time gold rate ticker' },
+      { key: 'page.gold-news',         label: 'Gold News',         desc: 'Read-only external gold-market news feed' },
     ],
   },
   {
