@@ -1,240 +1,239 @@
 // app/api/gold-news/route.js
-// Read-only Gold News feed (V1) — RSS provider.
+// Read-only Gold News feed (V1) — DIRECT RSS AGGREGATOR.
 //
 // ISOLATION: this route is deliberately standalone. It does NOT touch Supabase,
 // the OLD/NEW CRMs, purchases, consignments, cal_quotas, ClearTax, goldapp-cron,
-// or any database. Its ONLY external dependency is public RSS (Google News RSS
-// search feeds), reached over HTTPS with NO API key. A failure here can never
-// affect any operational module — the worst case is an empty Gold News list.
+// or any database. Its ONLY external dependency is public RSS from reputable
+// publishers/institutions, reached over HTTPS with NO API key. A failure here
+// can never affect any operational module — worst case is an empty news list.
 //
-// Provider: Google News RSS search (https://news.google.com/rss/search). No
-// credential required. Feeds are defined per category below. To change/extend
-// sources, edit CATEGORIES — nothing else in the app depends on the provider.
+// Google News RSS was removed: it returned HTTP 429 / consent HTML to Railway's
+// datacenter IP. This aggregator reads direct publisher/institution feeds that
+// serve normal clients. No Google News request remains. No API key. No scraping.
 //
-// Parser: intentionally dependency-free. Google News RSS is well-formed and
-// stable, so a small tag extractor is safer than pulling in an XML library.
+// Parser: intentionally dependency-free (no XML lib). Handles RSS <item> and
+// Atom <entry>, common date/description variants, CDATA, entities, whitespace.
 
 import { requireAuthForPage } from '../../../lib/apiAuth'
 
-// ── Category → RSS feed definitions ─────────────────────────────────────────
-// Each category is one or more Google News RSS search queries. Multiple feeds
-// per category are supported (results are merged + de-duplicated). `hl/gl/ceid`
-// pick the locale (India vs US editions). No credentials — RSS needs none.
-const CATEGORIES = {
-  latest: {
-    label: 'Latest',
-    feeds: [
-      { q: 'gold OR XAUUSD OR bullion price', hl: 'en-IN', gl: 'IN', ceid: 'IN:en' },
-    ],
-  },
-  india: {
-    label: 'India',
-    feeds: [
-      { q: 'India gold price OR MCX gold OR gold rate India', hl: 'en-IN', gl: 'IN', ceid: 'IN:en' },
-    ],
-  },
-  global: {
-    label: 'Global',
-    feeds: [
-      { q: 'gold price OR bullion OR XAUUSD OR spot gold OR gold ETF', hl: 'en-US', gl: 'US', ceid: 'US:en' },
-    ],
-  },
-  fed_macro: {
-    label: 'Fed & Macro',
-    feeds: [
-      { q: 'gold Federal Reserve OR Treasury yields OR US dollar OR inflation', hl: 'en-US', gl: 'US', ceid: 'US:en' },
-    ],
-  },
-  central_banks: {
-    label: 'Central Banks',
-    feeds: [
-      { q: 'central bank gold purchases OR gold reserves OR RBI gold', hl: 'en-US', gl: 'US', ceid: 'US:en' },
-    ],
-  },
-  recycling: {
-    label: 'Gold Recycling',
-    feeds: [
-      { q: 'India gold recycling OR scrap gold OR gold jewellery demand', hl: 'en-IN', gl: 'IN', ceid: 'IN:en' },
-    ],
-  },
+// ── Feed registry (direct publisher / institution RSS) ──────────────────────
+// goldFocused feeds are already gold-scoped, so broad categories accept all
+// their items; non-goldFocused feeds must pass gold-relevance for broad
+// categories. `source` is the fallback attribution when an item lacks its own.
+const FEEDS = {
+  bl_gold:   { url: 'https://www.thehindubusinessline.com/markets/gold/feeder/default.rss', source: 'BusinessLine',          goldFocused: true  },
+  livemint:  { url: 'https://www.livemint.com/rss/markets',                                 source: 'Mint',                  goldFocused: false },
+  fed:       { url: 'https://www.federalreserve.gov/feeds/press_monetary.xml',              source: 'Federal Reserve',       goldFocused: false },
+  rbi:       { url: 'https://www.rbi.org.in/pressreleases_rss.xml',                         source: 'Reserve Bank of India', goldFocused: false },
+  investing: { url: 'https://www.investing.com/rss/news_11.rss',                            source: 'Investing.com',         goldFocused: false },
 }
 
+// ── Relevance vocabularies ──────────────────────────────────────────────────
+// Broad categories (latest/india/global) require an explicit GOLD term so the
+// feed stays gold — pure macro/FX items are NOT enough here (they belong to
+// Fed & Macro). Items from a goldFocused feed pass by design.
+const GOLD_TERMS = [
+  'gold', 'bullion', 'xau', 'mcx', 'precious metal', 'sovereign gold bond', 'sgb',
+  'gold etf', 'gold reserve', 'gold import', 'gold recycl', 'recycled gold', 'scrap gold',
+  'jewellery', 'jewelry', 'hallmark', 'gold loan', 'gold demand', 'gold price', 'gold rate',
+  'gold futures', 'gold bond', 'gold monetis', 'gold monetiz',
+]
+// Fed & Macro gates on macro drivers (these directly move gold); an item need
+// not mention gold to qualify.
+const FED_TERMS = [
+  'federal reserve', 'the fed', "fed's", 'fomc', 'powell', 'monetary policy', 'interest rate',
+  'rate cut', 'rate hike', 'rate decision', 'treasury yield', 'bond yield',
+  'us dollar', 'dollar index', 'dxy', 'inflation', 'cpi', 'pce', 'payroll', 'jackson hole',
+]
+// Central Banks: must be gold IN a central-bank context — this deliberately
+// excludes generic RBI/Fed regulatory items (repo auctions, enforcement, etc.).
+const CB_BANK_TOKENS = [
+  'central bank', 'reserve bank', 'rbi', 'pboc', 'ecb', 'bank of england', 'imf',
+  'reserves', 'tonne', 'tonnes',
+]
+const centralBankGate = (hay) => hay.includes('gold') && CB_BANK_TOKENS.some(t => hay.includes(t))
+// Gold Recycling: gold-specific recycling / jewellery / demand phrases only, so
+// unrelated items (a stray "import"/"scrap" in a description) don't leak in.
+const RECYCLE_TERMS = [
+  'gold recycl', 'recycled gold', 'scrap gold', 'gold scrap', 'jewellery', 'jewelry',
+  'gold demand', 'gold import', 'gold loan', 'sovereign gold bond', 'sgb', 'gold monetis',
+  'gold monetiz', 'hallmark', 'old gold', 'pledged gold', 'gold jewellery',
+]
+
+// ── Category model ──────────────────────────────────────────────────────────
+// `require` gates a specialised category: an array (match any term) or a
+// predicate(hay)->bool. When null, the broad gold-relevance gate applies.
+const CATEGORIES = {
+  latest:        { label: 'Latest',         feeds: ['bl_gold', 'livemint', 'investing'], require: null },
+  india:         { label: 'India',          feeds: ['bl_gold', 'livemint', 'rbi'],       require: null },
+  global:        { label: 'Global',         feeds: ['bl_gold', 'investing'],             require: null },
+  fed_macro:     { label: 'Fed & Macro',    feeds: ['fed', 'bl_gold'],                   require: FED_TERMS },
+  central_banks: { label: 'Central Banks',  feeds: ['bl_gold', 'rbi', 'fed'],            require: centralBankGate },
+  recycling:     { label: 'Gold Recycling', feeds: ['bl_gold', 'livemint', 'rbi'],       require: RECYCLE_TERMS },
+}
 const DEFAULT_CATEGORY = 'latest'
 
-// ── Relevance gate ──────────────────────────────────────────────────────────
-// Gold News must not drift into a generic feed. Keep an article only if its
-// title or description mentions something materially tied to gold or a macro
-// driver that directly moves gold. Conservative allowlist.
-const RELEVANCE_TERMS = [
-  'gold', 'bullion', 'xau', 'mcx', 'ounce', 'precious metal',
-  'federal reserve', 'the fed', 'treasury yield', 'us dollar', 'dollar index',
-  'inflation', 'central bank', 'gold reserves', 'gold etf',
-  'gold recycling', 'scrap gold', 'jewellery', 'jewelry', 'rbi',
-]
-function isRelevant(article) {
-  const hay = `${article.title} ${article.description}`.toLowerCase()
-  return RELEVANCE_TERMS.some(term => hay.includes(term))
-}
-
-// ── In-memory cache (per category) ──────────────────────────────────────────
-// Shared across all users of this server instance so we don't hammer the RSS
-// source. 10-minute freshness is plenty for news. On a fetch failure we fall
-// back to stale cache if present.
 const CACHE_TTL_MS = 10 * 60 * 1000
-const cache = new Map() // category -> { data, ts }
-
 const FEED_TIMEOUT_MS = 8000
 const MAX_ARTICLES = 12
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 
-// ── Tiny HTML / entity cleaners ─────────────────────────────────────────────
+const feedCache = new Map()     // feed url -> { items, ts }
+const categoryCache = new Map() // category  -> { data, ts }
+
+// ── Text cleaners ───────────────────────────────────────────────────────────
 function decodeEntities(str) {
   if (!str) return ''
   return str
     .replace(/&#(\d+);/g, (_, n) => { try { return String.fromCodePoint(parseInt(n, 10)) } catch { return '' } })
     .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => { try { return String.fromCodePoint(parseInt(n, 16)) } catch { return '' } })
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#39;/g, "'")
 }
-function stripHtml(str) {
-  if (!str) return ''
-  return str.replace(/<[^>]*>/g, ' ')
-}
-function clean(str) {
-  return decodeEntities(stripHtml(decodeEntities(String(str || ''))))
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-function unwrapCdata(str) {
-  const m = /^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/.exec(str || '')
-  return m ? m[1] : (str || '')
-}
+const stripHtml = (s) => (s ? s.replace(/<[^>]*>/g, ' ') : '')
+const unwrapCdata = (s) => { const m = /<!\[CDATA\[([\s\S]*?)\]\]>/.exec(s || ''); return m ? m[1] : (s || '') }
+const clean = (s) => decodeEntities(stripHtml(decodeEntities(unwrapCdata(String(s || ''))))).replace(/\s+/g, ' ').trim()
 
-// Extract the first <tag>...</tag> inner content from an item block.
+// First <tag ...>inner</tag> content (namespaced names like content:encoded ok).
 function tagContent(block, tag) {
-  const m = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i').exec(block)
-  return m ? unwrapCdata(m[1]) : ''
+  const m = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`, 'i').exec(block)
+  return m ? m[1] : ''
+}
+function firstNonEmpty(block, tags) {
+  for (const t of tags) { const v = clean(tagContent(block, t)); if (v) return v }
+  return ''
+}
+// Link works for RSS (<link>url</link>) and Atom (<link href="url" .../>).
+function extractLink(block) {
+  const text = clean(tagContent(block, 'link'))
+  if (text) return text
+  const hrefs = [...block.matchAll(/<link\b([^>]*)>/gi)].map(m => m[1])
+  const pick = hrefs.find(a => /rel=["']alternate["']/i.test(a)) || hrefs.find(a => !/rel=["']self["']/i.test(a)) || hrefs[0]
+  if (pick) { const h = /href=["']([^"']+)["']/i.exec(pick); if (h) return decodeEntities(h[1]).trim() }
+  return ''
 }
 
-// ── RSS parse ───────────────────────────────────────────────────────────────
-function parseRss(xml) {
-  const items = []
-  const itemRe = /<item\b[\s\S]*?<\/item>/gi
+function parseFeed(xml, feed) {
+  const isAtom = /<entry\b/i.test(xml) && !/<item\b/i.test(xml)
+  const blockRe = isAtom ? /<entry\b[\s\S]*?<\/entry>/gi : /<item\b[\s\S]*?<\/item>/gi
+  const out = []
   let m
-  while ((m = itemRe.exec(xml)) !== null) {
+  while ((m = blockRe.exec(xml)) !== null) {
     const block = m[0]
-    const rawTitle = clean(tagContent(block, 'title'))
-    const link = clean(tagContent(block, 'link'))
-    const pubDate = clean(tagContent(block, 'pubDate'))
-    const rawDesc = clean(tagContent(block, 'description'))
-    const sourceTag = clean(tagContent(block, 'source'))
-
-    // Google News titles are "Headline - Source". Prefer the <source> element;
-    // fall back to the trailing " - Source" segment, then strip it from title.
-    let source = sourceTag
-    let title = rawTitle
-    if (!source) {
-      const dash = rawTitle.lastIndexOf(' - ')
-      if (dash > 0) source = rawTitle.slice(dash + 3).trim()
-    }
-    if (source && title.endsWith(` - ${source}`)) {
-      title = title.slice(0, title.length - source.length - 3).trim()
-    }
-
-    // Google News descriptions are link-list HTML — often just repeats the
-    // headline/source. Blank it out when it collapses to the title.
-    let description = rawDesc
-    if (!description || description.toLowerCase().startsWith(title.toLowerCase())) description = ''
-
+    const title = clean(tagContent(block, 'title'))
+    const url = extractLink(block)
+    if (!title || !url) continue
+    const rawDate = firstNonEmpty(block, ['pubDate', 'dc:date', 'published', 'updated', 'date'])
     let published_at = null
-    if (pubDate) {
-      const d = new Date(pubDate)
-      if (!Number.isNaN(d.getTime())) published_at = d.toISOString()
-    }
-
-    if (!title || !link) continue
-    items.push({
-      id: link,
+    if (rawDate) { const d = new Date(rawDate); if (!Number.isNaN(d.getTime())) published_at = d.toISOString() }
+    let description = firstNonEmpty(block, ['description', 'summary', 'content:encoded', 'content'])
+    if (description && description.toLowerCase().startsWith(title.toLowerCase())) description = ''
+    if (description.length > 300) description = description.slice(0, 297).trimEnd() + '…'
+    const itemSource = clean(tagContent(block, 'source'))
+    out.push({
+      id: url,
       title,
       description,
-      url: link,
-      source: source || 'Google News',
+      url,
+      source: itemSource || feed.source,
       published_at,
-      image: null, // Google News RSS does not carry reliable thumbnails
+      image: null,
+      _goldFocused: feed.goldFocused,
     })
   }
-  return items
+  return out
 }
 
-async function fetchFeed({ q, hl, gl, ceid }) {
-  const params = new URLSearchParams({ q, hl, gl, ceid })
-  const url = `https://news.google.com/rss/search?${params.toString()}`
+// Fetch + validate one feed. Throws if the response is not a healthy feed
+// (bad status, non-feed body, or zero parsed items) so it is NOT counted as
+// a successful/empty feed.
+async function fetchAndParse(feed) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FEED_TIMEOUT_MS)
   try {
-    const res = await fetch(url, {
+    const res = await fetch(feed.url, {
       signal: controller.signal,
+      redirect: 'follow',
       cache: 'no-store',
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; GoldApp-GoldNews/1.0)' },
+      headers: { 'User-Agent': UA, 'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*' },
     })
-    if (!res.ok) throw new Error(`rss_${res.status}`)
-    const xml = await res.text()
-    return parseRss(xml)
+    if (!res.ok) throw new Error(`http_${res.status}`)
+    const body = await res.text()
+    if (!/<rss\b|<feed\b|<item\b|<entry\b/i.test(body)) throw new Error('not_a_feed')
+    const items = parseFeed(body, feed)
+    if (items.length === 0) throw new Error('empty_feed')
+    return items
   } finally {
     clearTimeout(timer)
   }
 }
 
-// Normalized-title key for de-duplication.
-function dedupeKey(a) {
-  return a.title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+// Cached feed fetch: fresh cache → reuse; on failure → serve stale cache if any,
+// else rethrow so the feed counts as failed.
+async function getFeedItems(key) {
+  const feed = FEEDS[key]
+  const cached = feedCache.get(feed.url)
+  if (cached && Date.now() - cached.ts < CACHE_TTL_MS) return cached.items
+  try {
+    const items = await fetchAndParse(feed)
+    feedCache.set(feed.url, { items, ts: Date.now() })
+    return items
+  } catch (err) {
+    if (cached) return cached.items // transient failure — reuse last good items
+    throw err
+  }
 }
 
-async function buildCategory(categoryKey) {
-  const cat = CATEGORIES[categoryKey] || CATEGORIES[DEFAULT_CATEGORY]
+function passesFilters(item, conf) {
+  // Match on the HEADLINE only. Publisher feed descriptions often carry stray
+  // "also read" link blocks that cause false positives; the title is the clean
+  // relevance signal.
+  const hay = item.title.toLowerCase()
+  if (typeof conf.require === 'function') return conf.require(hay)
+  if (Array.isArray(conf.require)) return conf.require.some(t => hay.includes(t))
+  // Broad category: keep it gold-relevant. Gold-focused feeds pass by design.
+  if (item._goldFocused) return true
+  return GOLD_TERMS.some(t => hay.includes(t))
+}
 
-  // Fetch all feeds for the category; a single feed failing must not sink the
-  // rest. If every feed fails, throw so the caller can serve stale/empty.
-  const results = await Promise.allSettled(cat.feeds.map(fetchFeed))
-  const ok = results.filter(r => r.status === 'fulfilled')
+// Build one category. Returns { articles, rawCount, feedsOk, feedsTotal }.
+// Throws 'all_feeds_failed' only when EVERY mapped feed failed (no items at all).
+async function buildCategory(categoryKey) {
+  const conf = CATEGORIES[categoryKey] || CATEGORIES[DEFAULT_CATEGORY]
+  const settled = await Promise.allSettled(conf.feeds.map(getFeedItems))
+  const ok = settled.filter(s => s.status === 'fulfilled')
   if (ok.length === 0) throw new Error('all_feeds_failed')
 
-  const merged = ok.flatMap(r => r.value)
+  const merged = ok.flatMap(s => s.value)
+  const relevant = merged.filter(a => passesFilters(a, conf))
 
-  // Relevance filter, then de-duplicate by normalized title AND canonical url.
-  const seenTitle = new Set()
-  const seenUrl = new Set()
-  const deduped = []
-  for (const a of merged) {
-    if (!isRelevant(a)) continue
-    const tk = dedupeKey(a)
-    const uk = (a.url || '').split('?')[0]
-    if (tk && seenTitle.has(tk)) continue
+  // De-duplicate by canonical url AND normalized title.
+  const seenUrl = new Set(), seenTitle = new Set(), deduped = []
+  for (const a of relevant) {
+    const uk = (a.url || '').split('?')[0].replace(/\/$/, '')
+    const tk = a.title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
     if (uk && seenUrl.has(uk)) continue
-    if (tk) seenTitle.add(tk)
+    if (tk && seenTitle.has(tk)) continue
     if (uk) seenUrl.add(uk)
+    if (tk) seenTitle.add(tk)
     deduped.push(a)
   }
 
-  // Newest-first; undated items sink to the bottom.
   deduped.sort((a, b) => {
     const ta = a.published_at ? new Date(a.published_at).getTime() : 0
     const tb = b.published_at ? new Date(b.published_at).getTime() : 0
     return tb - ta
   })
 
-  return deduped.slice(0, MAX_ARTICLES)
+  // Strip internal marker before returning.
+  const articles = deduped.slice(0, MAX_ARTICLES).map(({ _goldFocused, ...rest }) => rest)
+  return { articles, rawCount: merged.length, feedsOk: ok.length, feedsTotal: conf.feeds.length }
 }
 
 export async function GET(req) {
-  // Gold News is a delegable page permission (page.gold-news). Gate the API by
-  // that permission (not a fixed role group) so a role granted the page in Role
-  // Management is accepted — and super_admin keeps god-mode. Falls back to the
-  // static ROLE_PAGES map when a role has no DB rows.
+  // Delegable page permission: super_admin keeps god-mode; a role granted
+  // page.gold-news in Role Management is accepted; falls back to static
+  // ROLE_PAGES for roles without DB rows.
   const auth = await requireAuthForPage(req, 'gold-news')
   if (!auth.ok) return auth.response
 
@@ -242,35 +241,38 @@ export async function GET(req) {
   const requested = searchParams.get('category') || DEFAULT_CATEGORY
   const category = CATEGORIES[requested] ? requested : DEFAULT_CATEGORY
 
-  // Serve fresh cache if we have it.
-  const cached = cache.get(category)
+  const cached = categoryCache.get(category)
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
     return Response.json({ ...cached.data, cached: true })
   }
 
   try {
-    const articles = await buildCategory(category)
-    const data = {
-      category,
-      articles,
-      count: articles.length,
-      updated_at: new Date().toISOString(),
-      error: null,
+    const { articles, rawCount, feedsOk, feedsTotal } = await buildCategory(category)
+
+    if (articles.length > 0) {
+      const data = {
+        category,
+        articles,
+        count: articles.length,
+        updated_at: new Date().toISOString(),
+        error: null,
+        partial: feedsOk < feedsTotal || undefined,
+      }
+      categoryCache.set(category, { data, ts: Date.now() }) // cache only real content
+      return Response.json(data)
     }
-    cache.set(category, { data, ts: Date.now() })
-    return Response.json(data)
+
+    // Feeds responded but produced no relevant stories. This is a LEGITIMATE
+    // empty result — not a provider failure. Do NOT overwrite good stale cache
+    // and do NOT cache the empty (so the next request re-checks); rawCount>0
+    // proves parsing worked.
+    void rawCount
+    if (cached) return Response.json({ ...cached.data, cached: true, stale: true })
+    return Response.json({ category, articles: [], count: 0, updated_at: new Date().toISOString(), error: null })
   } catch {
-    // Never propagate a hard failure — the dashboard must keep working and this
-    // screen must degrade to a graceful empty/error state. Prefer stale cache.
-    if (cached) {
-      return Response.json({ ...cached.data, cached: true, stale: true })
-    }
-    return Response.json({
-      category,
-      articles: [],
-      count: 0,
-      updated_at: null,
-      error: 'provider_error',
-    })
+    // Every feed failed. Never cache this as an empty success. Prefer good
+    // stale cache; otherwise surface a real error state to the UI.
+    if (cached) return Response.json({ ...cached.data, cached: true, stale: true })
+    return Response.json({ category, articles: [], count: 0, updated_at: null, error: 'provider_error' })
   }
 }
