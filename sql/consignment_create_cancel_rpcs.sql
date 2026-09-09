@@ -227,10 +227,12 @@ BEGIN
     END IF;
   END IF;
 
-  -- Return bills to source — but only if the consignment was actually approved.
-  -- Pre-approval consignments never flipped purchase state (deferred-movement model).
+  -- Return bills to source. EXTERNAL consignments only flip purchase state on
+  -- approval (deferred-movement model), so restore only when approved. INTERNAL
+  -- consignments flip current_branch = dest_branch at creation (pre-approval),
+  -- so they must be restored whether or not they were ever approved.
   IF v_purchase_ids IS NOT NULL AND array_length(v_purchase_ids, 1) > 0
-     AND v_c.approval_status = 'approved' THEN
+     AND (v_c.movement_type = 'INTERNAL' OR v_c.approval_status = 'approved') THEN
     UPDATE purchases
     SET stock_status   = 'at_branch',
         current_branch = v_c.branch_name,
