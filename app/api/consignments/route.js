@@ -2869,11 +2869,22 @@ export async function GET(req) {
 
     if (!purchaseIds.length) return Response.json({ data: {} })
 
-    // Pull all INTERNAL consignment_items for these purchases + parent consignment
-    const { data: links } = await supabase
-      .from('consignment_items')
-      .select('purchase_id, consignment:consignment_id(id, tmp_prf_no, challan_no, internal_no, movement_type, status, branch_name, dest_branch, created_at, received_at)')
-      .in('purchase_id', purchaseIds)
+    // Pull the INTERNAL + received consignment_items for these purchases + parent
+    // consignment. The movement_type/status filter is pushed into the query (an
+    // inner embedded join) so only the relevant links come back instead of every
+    // link joined and then discarded in JS. purchase_ids are chunked to ~100 so
+    // the PostgREST URL stays short; chunks run sequentially for steady DB load.
+    const links = []
+    const THCH = 100
+    for (let i = 0; i < purchaseIds.length; i += THCH) {
+      const { data } = await supabase
+        .from('consignment_items')
+        .select('purchase_id, consignment:consignment_id!inner(id, tmp_prf_no, challan_no, internal_no, movement_type, status, branch_name, dest_branch, created_at, received_at)')
+        .in('purchase_id', purchaseIds.slice(i, i + THCH))
+        .eq('consignment.movement_type', 'INTERNAL')
+        .eq('consignment.status', 'received')
+      if (data) links.push(...data)
+    }
 
     // For each purchase, pick the most recent INTERNAL+received consignment
     const map = {}
