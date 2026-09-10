@@ -2763,40 +2763,13 @@ export async function GET(req) {
       data.push(...page)
       if (page.length < CHUNK) break
     }
-    // Annotate each row with the latest "documents emailed" timestamp so the UI
-    // can flag which consignments have already had their docs mailed to the
-    // branch (ops can still resend). Best-effort.
-    //
-    // NOTE: chunk the id list. A single `.in(all-ids)` with hundreds of
-    // consignments builds a ~17 KB URL that PostgREST rejects (URI too long) —
-    // the query then errored and the catch silently left EVERY row un-flagged,
-    // so the "Mail Sent" state never showed. Batch of 100 keeps each URL small.
-    if (data?.length) {
-      try {
-        const ids = data.map(r => r.id)
-        const latest = {}, bounced = {}
-        const CH = 100
-        for (let i = 0; i < ids.length; i += CH) {
-          const { data: rows } = await supabase
-            .from('consignment_activity_log')
-            .select('consignment_id, created_at, event_type')
-            .in('event_type', ['documents_emailed', 'documents_email_bounced'])
-            .in('consignment_id', ids.slice(i, i + CH))
-            .order('created_at', { ascending: false })
-          for (const row of (rows || [])) {
-            if (row.event_type === 'documents_emailed'        && !latest[row.consignment_id])  latest[row.consignment_id]  = row.created_at
-            if (row.event_type === 'documents_email_bounced'  && !bounced[row.consignment_id]) bounced[row.consignment_id] = row.created_at
-          }
-        }
-        // Prefer the event-log timestamp (authoritative history) but fall back to
-        // the real column so a row is never un-flagged — covers rows stamped on
-        // the column before this log query, and keeps working pre-migration.
-        for (const r of data) {
-          r.documents_emailed_at       = latest[r.id]  || r.documents_emailed_at       || null
-          r.documents_email_bounced_at = bounced[r.id] || r.documents_email_bounced_at || null
-        }
-      } catch { /* leave rows un-annotated on log hiccup */ }
-    }
+    // documents_emailed_at / documents_email_bounced_at come straight from the
+    // consignments row (the select('*') above). The email-send path stamps
+    // documents_emailed_at and the bounce scanner stamps
+    // documents_email_bounced_at, so these real columns already carry the
+    // Mail-Sent / Delivery-Failed timestamps — no per-row consignment_activity_log
+    // enrichment is needed on the normal list refresh. (Full lifecycle history
+    // remains available via action=activity_log.)
     return Response.json({ data, error: error?.message })
   }
 

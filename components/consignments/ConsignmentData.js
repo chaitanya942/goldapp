@@ -95,6 +95,52 @@ function AgeBadge({ days, t }) {
   return <span style={{ fontSize: '10px', color, background: `${color}18`, borderRadius: '5px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.02em' }}>{days}d</span>
 }
 
+// Active = in-flight rows + accounts-rejected rows (so ops can see the
+// pushback + reason). Hide:
+//   - seed templates
+//   - operator-cancelled rows (status=cancelled WITHOUT approval=rejected)
+//   - INTERNAL/EXTERNAL received rows (after the 24h grace window for INTERNAL)
+// Keep:
+//   - approval_status='rejected' rows even though the reject flow auto-sets
+//     status='cancelled' — operations needs to see them and the rejection
+//     reason. They stay visible until ops re-creates or 7d passes.
+// Shared by fetchAll() and refreshConsignmentsList() so both apply the EXACT
+// same rules — never two subtly different filters.
+function filterActiveConsignments(rows) {
+  return (rows || []).filter(x => {
+    if (x.status === 'seed') return false
+    // A cancelled EWB / E-Invoice records approval_status='rejected' with a
+    // "Rejected because of cancellation of…" reason — but that's a
+    // CANCELLATION, not an accounts rejection. Don't treat it as rejected here
+    // (no REJECTED pill, no "accounts rejected" banner); it's hidden like any
+    // other cancelled row and lives on the Approvals → Cancellations tab.
+    const isCancelReject = x.approval_status === 'rejected'
+      && /^Rejected because of cancellation of/i.test(x.rejection_reason || '')
+    const isRejected = x.approval_status === 'rejected' && !isCancelReject
+    if (x.status === 'cancelled' && !isRejected) return false
+    // Anything still awaiting a decision must surface here — otherwise it
+    // can appear in the accounts Pending Approvals queue but be invisible
+    // to ops. Trumps the received/age gates below in case status/approval
+    // got out of sync (e.g. a received row that never got approved).
+    if (x.approval_status === 'pending') return true
+    // Rejected rows: keep for 7 days (gives ops a clear window to review
+    // the reason, fix data, and re-create). After that, they live in the
+    // approval-history audit trail only.
+    if (isRejected) {
+      const ageMs = Date.now() - new Date(x.approved_at || x.created_at).getTime()
+      if (ageMs > 7 * 24 * 3600 * 1000) return false
+      return true
+    }
+    if (x.status === 'received' && x.movement_type !== 'INTERNAL') return false
+    // Auto-received INTERNAL: keep visible for 24h since creation
+    if (x.status === 'received' && x.movement_type === 'INTERNAL') {
+      const ageMs = Date.now() - new Date(x.created_at).getTime()
+      if (ageMs > 24 * 3600 * 1000) return false
+    }
+    return true
+  })
+}
+
 export default function ConsignmentData() {
   const { theme, consignmentDeepLink, setConsignmentDeepLink, setActiveNav } = useApp()
   // Track whether the user landed here via a Branch Stock Overview row click,
@@ -240,47 +286,7 @@ export default function ConsignmentData() {
     ])
     setPurchases(p.data || [])
     setBranches(b.data || [])
-    // Active = in-flight rows + accounts-rejected rows (so ops can see the
-    // pushback + reason). Hide:
-    //   - seed templates
-    //   - operator-cancelled rows (status=cancelled WITHOUT approval=rejected)
-    //   - INTERNAL/EXTERNAL received rows (after the 24h grace window for INTERNAL)
-    // Keep:
-    //   - approval_status='rejected' rows even though the reject flow auto-sets
-    //     status='cancelled' — operations needs to see them and the rejection
-    //     reason. They stay visible until ops re-creates or 7d passes.
-    const filteredConsignments = (c.data || []).filter(x => {
-      if (x.status === 'seed') return false
-      // A cancelled EWB / E-Invoice records approval_status='rejected' with a
-      // "Rejected because of cancellation of…" reason — but that's a
-      // CANCELLATION, not an accounts rejection. Don't treat it as rejected here
-      // (no REJECTED pill, no "accounts rejected" banner); it's hidden like any
-      // other cancelled row and lives on the Approvals → Cancellations tab.
-      const isCancelReject = x.approval_status === 'rejected'
-        && /^Rejected because of cancellation of/i.test(x.rejection_reason || '')
-      const isRejected = x.approval_status === 'rejected' && !isCancelReject
-      if (x.status === 'cancelled' && !isRejected) return false
-      // Anything still awaiting a decision must surface here — otherwise it
-      // can appear in the accounts Pending Approvals queue but be invisible
-      // to ops. Trumps the received/age gates below in case status/approval
-      // got out of sync (e.g. a received row that never got approved).
-      if (x.approval_status === 'pending') return true
-      // Rejected rows: keep for 7 days (gives ops a clear window to review
-      // the reason, fix data, and re-create). After that, they live in the
-      // approval-history audit trail only.
-      if (isRejected) {
-        const ageMs = Date.now() - new Date(x.approved_at || x.created_at).getTime()
-        if (ageMs > 7 * 24 * 3600 * 1000) return false
-        return true
-      }
-      if (x.status === 'received' && x.movement_type !== 'INTERNAL') return false
-      // Auto-received INTERNAL: keep visible for 24h since creation
-      if (x.status === 'received' && x.movement_type === 'INTERNAL') {
-        const ageMs = Date.now() - new Date(x.created_at).getTime()
-        if (ageMs > 24 * 3600 * 1000) return false
-      }
-      return true
-    })
+    const filteredConsignments = filterActiveConsignments(c.data)
     setConsignments(filteredConsignments)
     setUnknownBranches(u.data || [])
     // Cache the *filtered* consignments (the same shape consumers expect) so a
@@ -293,6 +299,19 @@ export default function ConsignmentData() {
       unknownBranches: u.data || [],
     })
     if (!silent) setLoading(false)
+  }, [])
+
+  // Lightweight post-action refresh: after create / EWB / E-Invoice generation
+  // only the consignment list needs to update (branch stock, the branch master
+  // and unknown-branches are unaffected). Fetch ONLY action=consignments, apply
+  // the SAME active-row filter as fetchAll (shared helper), and patch just the
+  // consignments slice of the cache so the other cached datasets survive.
+  const refreshConsignmentsList = useCallback(async () => {
+    const c = await authedFetch('/api/consignments?action=consignments').then(r => r.json())
+    const filteredConsignments = filterActiveConsignments(c.data)
+    setConsignments(filteredConsignments)
+    const prev = getCache('cd:fetchAll') || {}
+    setCache('cd:fetchAll', { ...prev, consignments: filteredConsignments })
   }, [])
 
   // Render the bill picker immediately (don't block on sync). In parallel,
@@ -572,7 +591,7 @@ export default function ConsignmentData() {
       setDestBranch(''); setEwayBillNo('')
       setBranchContactName(''); setBranchContactPhone('')
       setTransporterMode('bvc'); setTransporterOther('')
-      await fetchAll()
+      await refreshConsignmentsList()
       // Return to Active Consignments list with the new one highlighted
       setNav(null)
     } finally { setCreating(false) }
@@ -696,7 +715,7 @@ export default function ConsignmentData() {
       const warn = j.auto_approve_warning
         ? ` (auto-approve needs attention: ${j.auto_approve_warning})`
         : ''
-      try { await fetchAll() } catch {}
+      try { await refreshConsignmentsList() } catch {}
       setEinvoiceModal(null)
       setToast({ msg: `E-Invoice ${j.doc_no || ''} generated.${warn}`, type: warn ? 'error' : 'success' })
     } catch (e) {
@@ -728,7 +747,7 @@ export default function ConsignmentData() {
         : ''
       // Refresh the list FIRST (modal stays in Generating…), then close — so
       // the row is already showing the approved / PDF state when it reappears.
-      try { await fetchAll() } catch {}
+      try { await refreshConsignmentsList() } catch {}
       setEwbModal(null)
       setToast({ msg: `E-Way Bill ${j.ewb_no} generated.${warn}`, type: warn ? 'error' : 'success' })
     } catch (e) {
