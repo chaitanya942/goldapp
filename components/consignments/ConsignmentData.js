@@ -281,7 +281,7 @@ export default function ConsignmentData() {
     const [p, b, c, u] = await Promise.all([
       authedFetch('/api/consignments?action=stock_in_branch').then(r => r.json()),
       authedFetch('/api/consignments?action=branches').then(r => r.json()),
-      authedFetch('/api/consignments?action=consignments').then(r => r.json()),
+      authedFetch('/api/consignments?action=consignments&view=active_list').then(r => r.json()),
       authedFetch('/api/consignments?action=unknown_branches').then(r => r.json()),
     ])
     setPurchases(p.data || [])
@@ -307,7 +307,7 @@ export default function ConsignmentData() {
   // the SAME active-row filter as fetchAll (shared helper), and patch just the
   // consignments slice of the cache so the other cached datasets survive.
   const refreshConsignmentsList = useCallback(async () => {
-    const c = await authedFetch('/api/consignments?action=consignments').then(r => r.json())
+    const c = await authedFetch('/api/consignments?action=consignments&view=active_list').then(r => r.json())
     const filteredConsignments = filterActiveConsignments(c.data)
     setConsignments(filteredConsignments)
     const prev = getCache('cd:fetchAll') || {}

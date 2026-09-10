@@ -23,6 +23,42 @@ import { docFilename } from '../../../lib/docFilename'
 // from the government portal when ops cancels a fully-documented consignment.
 const ACCOUNTS_CANCEL_CC = ['Rudresh.kedia@whitegold.money', 'sunay.kumar@whitegold.money']
 
+// Minimal column set for the Consignment Data active list (view=active_list).
+// EXACTLY the consignment-row fields ConsignmentData.js reads — for rendering,
+// the active-row filter, the document/EWB/E-Invoice workflow, approval/rejection
+// display, email status, cancellation, and doc filenames (via lib/docFilename,
+// which reads created_at/branch_name/tmp_prf_no/challan_no/eway_bill_no/irn/
+// einvoice_doc_no from the row). Deliberately EXCLUDES heavy payload/audit
+// columns (e.g. cleartax_response, signed_qr_code, gst_rate_snapshot) that the
+// screen never reads — those bloat the response to ~17 MB with select('*').
+// The plain action=consignments (no view) keeps select('*') for reports/others.
+const CONSIGNMENT_ACTIVE_LIST_COLS = [
+  'id',
+  'status',
+  'approval_status',
+  'rejection_reason',
+  'approved_at',
+  'approved_by',
+  'created_at',
+  'movement_type',
+  'tmp_prf_no',
+  'challan_no',
+  'branch_name',
+  'dest_branch',
+  'total_bills',
+  'total_net_wt',
+  'total_amount',
+  'consignee_report_generated_at',
+  'issue_voucher_generated_at',
+  'delivery_challan_generated_at',
+  'eway_bill_no',
+  'irn',
+  'einvoice_doc_no',
+  'documents_emailed_at',
+  'documents_email_bounced_at',
+  'cancel_reason',
+].join(', ')
+
 // Purchase-date lock helper — returns the subset of `dates` (YYYY-MM-DD) that
 // fall inside any active lock range (bidding_purchase_date_locks). Used to block
 // booking of locked-date bills in create_booking + attach_selected_to_pipeline.
@@ -2735,11 +2771,15 @@ export async function GET(req) {
     const branch   = searchParams.get('branch')
     const dateFrom = searchParams.get('date_from')
     const dateTo   = searchParams.get('date_to')
+    // view=active_list (Consignment Data screen): select only the columns that
+    // screen reads, so the payload isn't bloated by heavy JSON columns. Any
+    // other caller (reports/other screens) keeps the full select('*') contract.
+    const cols     = searchParams.get('view') === 'active_list' ? CONSIGNMENT_ACTIVE_LIST_COLS : '*'
 
     const buildQuery = () => {
       let q = supabase
         .from('consignments')
-        .select('*')
+        .select(cols)
         .neq('status', 'seed')          // never show seed records in reports
         .order('created_at', { ascending: false })
       if (status)   q = q.eq('status', status)
