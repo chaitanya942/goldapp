@@ -32,13 +32,14 @@ const supabase = createClient(
 
 const ALLOWED_ACTIONS = new Set(['rejected', 'pending', 'walkin', 'blacklisted', 'branches', 'kpis', 'live', 'flashcards'])
 
-// In-memory cache for the lightweight `flashcards` endpoint. LiveFeedFlashcards
-// + the dashboard panel both poll every 10s; a small TTL coalesces concurrent
-// callers (and same caller across ticks) so we don't run the MySQL queries
-// every time. 5s keeps us inside the ops-stated "5-10s is fine" tolerance.
+// In-memory cache for the lightweight `flashcards` endpoint. The dashboard may
+// poll every 10 seconds, but the expensive flashcard calculation is cached for
+// 30 seconds. This reduces repeated OLD CRM / NEW CRM / Supabase work — because
+// the cache lifetime now exceeds the poll interval, consecutive polls hit the
+// cache instead of re-running the queries every tick.
 // Cache key includes the region-scope fingerprint so a region-restricted user
 // can never read another scope's cached payload.
-const FLASHCARD_CACHE_TTL_MS = 5000
+const FLASHCARD_CACHE_TTL_MS = 30000
 const FLASHCARD_CACHE_MAX    = 50
 const flashcardCache = new Map()
 
