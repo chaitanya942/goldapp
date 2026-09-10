@@ -339,13 +339,6 @@ export async function GET(req) {
     const dateFrom = searchParams.get('date_from')
     const dateTo   = searchParams.get('date_to')
 
-    const { data: outsideBranches } = await supabase
-      .from('branches')
-      .select('name')
-      .eq('is_active', true)
-      .neq('region', 'Bangalore')
-    const outsideNames = (outsideBranches || []).map(b => b.name)
-
     // Two queries merged client-side:
     //   1. OWN bills — strict filter (approved, not deleted, at_branch)
     //   2. TRANSFERRED-IN bills — relaxed filter (just at_branch + not deleted)
@@ -400,20 +393,29 @@ export async function GET(req) {
       const firstErr = own1.error || own2.error || tr.error
       if (firstErr) return Response.json({ data: [], error: firstErr.message })
 
-      // Paginate — active consignment_items exceed 1000 globally; a truncated
-      // committed-set would let already-committed bills look pickable.
+      // Scope the committed-set lookup to just THESE candidate bills instead of
+      // scanning every active consignment_item company-wide. The result is
+      // mathematically identical — (branch candidates ∩ bills already committed
+      // to an active consignment) — but the cost is O(this branch's bills) not
+      // O(all in-flight items), so it no longer slows down as the company's
+      // consignment history grows. Same committed rule: consignment status NOT
+      // IN (cancelled, received). No date/age filter — every candidate bill is
+      // checked regardless of how old it is. Uses idx_consignment_items_purchase_id.
       const committedIds = new Set()
-      const CMCH = 1000
-      for (let i = 0; ; i += CMCH) {
+      const candidateIds = [
+        ...(own1.data || []),
+        ...(own2.data || []),
+        ...(tr.data   || []),
+      ].map(r => r.id)
+      const CMCH = 100   // chunk the .in() so the PostgREST URL stays short
+      for (let i = 0; i < candidateIds.length; i += CMCH) {
         const { data, error } = await supabase
           .from('consignment_items')
           .select('purchase_id, consignments!inner(status)')
+          .in('purchase_id', candidateIds.slice(i, i + CMCH))
           .not('consignments.status', 'in', '("cancelled","received")')
-          .range(i, i + CMCH - 1)
         if (error) return Response.json({ data: [], error: error.message })
-        if (!data || !data.length) break
-        for (const r of data) committedIds.add(r.purchase_id)
-        if (data.length < CMCH) break
+        for (const r of (data || [])) committedIds.add(r.purchase_id)
       }
 
       // De-dup defensively (a row should only fall in one bucket) and drop
@@ -432,6 +434,14 @@ export async function GET(req) {
 
     // Branch-overview path (no specific branch) — keep original strict filter.
     // Paginate: at_branch outside-Bangalore stock can exceed 1000 rows.
+    // The outside-Bangalore branch master is only needed HERE (for the or()
+    // clause below), so fetch it on the no-branch path rather than unconditionally.
+    const { data: outsideBranches } = await supabase
+      .from('branches')
+      .select('name')
+      .eq('is_active', true)
+      .neq('region', 'Bangalore')
+    const outsideNames = (outsideBranches || []).map(b => b.name)
     const orClause = `current_branch.in.(${outsideNames.map(n => `"${n}"`).join(',')}),and(current_branch.is.null,branch_name.in.(${outsideNames.map(n => `"${n}"`).join(',')}))`
     const buildBillsQ = () => {
       let q = supabase
