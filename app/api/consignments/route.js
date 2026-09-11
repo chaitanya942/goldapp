@@ -1216,6 +1216,8 @@ export async function GET(req) {
     // the per-section hero cards ops asked for, Total = booked + unbooked, so
     // we also need the BOOKED net weight that falls in each section's window.
     // One query, bucketed in JS to mirror the unbooked bucketing exactly.
+    const _bbtStart = Date.now()                    // booked-bands section total (diag)
+    const _bwqStart = Date.now(); let _bwqPages = 0 // paginated window query (diag)
     let bookedWindowBills = []
     if (allBookableBranchNames.length) {
       // Paginate — without a range, this caps at Supabase max_rows (1000) and
@@ -1239,10 +1241,14 @@ export async function GET(req) {
           .range(from, from + CHUNK - 1)
         if (bwErr || !bw?.length) break
         bookedWindowBills.push(...bw.map(b => ({ ...b, _owner: b.current_branch || b.branch_name })))
+        _bwqPages++   // diag: count pages fetched
         if (bw.length < CHUNK) break
         from += CHUNK
       }
     }
+    _bvTimings.booked_window_query_ms = Date.now() - _bwqStart
+    _bvTimings.booked_window_rows     = bookedWindowBills.length
+    _bvTimings.booked_window_pages    = _bwqPages
     const sumNet = (bills) => ({
       bills:  bills.length,
       net_wt: bills.reduce((s, b) => s + Number(b.net_weight || 0), 0),
@@ -1252,6 +1258,7 @@ export async function GET(req) {
     // JS-comparing purchase_date — purchase_date is a timestamptz, so the IST
     // day comes back as the prior UTC date and a JS string compare against
     // 'YYYY-MM-DD' silently dropped every bill (Booked Net always read 0).
+    const _bbangStart = Date.now()   // diag: separate Bangalore booked query
     let bookedBang = []
     if (bangaloreBranchNames.length) {
       const { data: bbk } = await supabase
@@ -1265,7 +1272,10 @@ export async function GET(req) {
         .not('booking_id', 'is', null)
       bookedBang = bbk || []
     }
+    _bvTimings.booked_bangalore_ms   = Date.now() - _bbangStart
+    _bvTimings.booked_bangalore_rows = bookedBang.length
     // Sections 2/3/4 (transit): booked in_consignment bills bucketed by arrival.
+    const _bipStart = Date.now()   // diag: bookedInflight/T24/48/72 JS derivation
     const bookedInflight = bookedWindowBills
       .filter(b => b.stock_status === 'in_consignment' && b.dispatched_at && outsideBranchNames.includes(b.branch_name))
       .map(b => {
@@ -1276,10 +1286,16 @@ export async function GET(req) {
     const bookedT24 = bookedInflight.filter(b => b._arrival_date === arrivalDate)
     const bookedT48 = bookedInflight.filter(b => b._arrival_date === dayAfterArrival)
     const bookedT72 = bookedInflight.filter(b => b._arrival_date === dayAfter2Arrival)
+    _bvTimings.booked_inflight_prepare_ms = Date.now() - _bipStart
+    _bvTimings.booked_inflight_rows       = bookedInflight.length
     // Stamp the ALREADY-BOOKED transit bills too, so their booked rows can show
     // the consignment-created date. bookedT24/48/72 are filtered views of
     // bookedInflight (same refs), so stamping the parent before bookedSection.
+    const _bisStart = Date.now()   // diag: ONLY the bookedInflight stamp call
     await stampConsignmentMeta(bookedInflight)
+    _bvTimings.booked_inflight_stamp_ms     = Date.now() - _bisStart
+    _bvTimings.booked_inflight_stamp_chunks = Math.ceil((bookedInflight.length || 0) / 100)
+    _bvTimings.booked_bands_total_ms        = Date.now() - _bbtStart
     _bvMark('booked_bands_ms', bookedWindowBills?.length)
     // Section 7 (branch pre-EOD): booked at_branch bills at the eligible branches.
     const preEodOwnerSet = new Set(preEodEligibleAfterDispatch)
