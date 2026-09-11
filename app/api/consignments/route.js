@@ -648,6 +648,20 @@ export async function GET(req) {
   // Query string:
   //   ?action=bidding_volume[&date=YYYY-MM-DD]   — arrival date (IST). Default: tomorrow.
   if (action === 'bidding_volume') {
+    // ── TEMP perf instrumentation (timing/counts only — no control-flow, query,
+    //    filter, column, ordering or business-logic change). Remove after diag.
+    //    _bvMark(label, rows?) records ms since the previous mark; total_ms and
+    //    the JSON line are emitted just before the response is built. Logs only
+    //    elapsed ms + row counts — never bill/customer/branch details or SQL. ──
+    const _bvT0 = Date.now()
+    let _bvLast = _bvT0
+    const _bvTimings = {}
+    const _bvMark = (label, rows) => {
+      const now = Date.now()
+      _bvTimings[label] = now - _bvLast
+      _bvLast = now
+      if (rows != null) _bvTimings[label.replace(/_ms$/, '_rows')] = rows
+    }
     const today = istToday()                                              // 'YYYY-MM-DD' IST
     const addDays = (yyyymmdd, n) => {
       const [y, m, d] = yyyymmdd.split('-').map(Number)
@@ -691,6 +705,7 @@ export async function GET(req) {
     if (bErr) return Response.json({ error: bErr.message }, { status: 500 })
     const branchMeta = {}
     for (const b of branchRows || []) branchMeta[b.name] = b
+    _bvMark('branches_ms', branchRows?.length)
 
     // Booking-volume eligibility keys off the MODEL: same-day-HO branches
     // (bangalore model, incl. KA-KOLAR) never consign, everyone else does.
@@ -744,6 +759,7 @@ export async function GET(req) {
       // labelled gain and shouldn't show as bookable.
       bangBills = (bb || []).filter(b => !b.audit_consumed_at)
     }
+    _bvMark('bangalore_today_ms', bangBills?.length)
 
     // 2) Outside Bangalore — bills currently in_consignment. Filter to those
     //    whose expected arrival (dispatched_at + branch.delivery_tat_hours)
@@ -778,6 +794,7 @@ export async function GET(req) {
         if (ib.length < CHUNK) break
       }
     }
+    _bvMark('inflight_ms', inflightBills?.length)
 
     // Compute arrival_date for each in-flight bill using working-day math
     // (skip Sundays — logistics partner is off). Examples:
@@ -823,6 +840,7 @@ export async function GET(req) {
         return { ...b, _arrival_date: arrivalIst, _tat_hours: tat }
       })
     }
+    _bvMark('outstation_pending_ms', forcePending?.length)
 
     // Consignment created · booking pending — in_consignment + unbooked bills
     // whose computed arrival is NEITHER tomorrow (Section 2 main) NOR the day
@@ -866,6 +884,7 @@ export async function GET(req) {
         // the gold actually came from. Ops needs that on the bill row.
         .map(b => ({ ...b, _origin_branch: b.branch_name, branch_name: b.current_branch || b.branch_name }))
     }
+    _bvMark('bangalore_pending_ms', bangalorePendingBooking?.length)
 
     // Bangalore bills the EOD audit already attributed to GAIN that ops may want
     // to LATE-BOOK to a customer. Surfaced as a separate, clearly-labelled,
@@ -891,6 +910,7 @@ export async function GET(req) {
         // the gold actually came from. Ops needs that on the bill row.
         .map(b => ({ ...b, _origin_branch: b.branch_name, branch_name: b.current_branch || b.branch_name }))
     }
+    _bvMark('gain_rebookable_ms', bangaloreGainRebookable?.length)
 
     // Back-compat alias for the existing UI (renders only the 24h bucket).
     const inflightForTarget = inflight24h
@@ -924,6 +944,7 @@ export async function GET(req) {
       postDispatchedBranches = new Set((todaysDispatches || []).map(c => c.branch_name))
     }
     const preEodEligibleAfterDispatch = preEodEligibleBranchNames.filter(n => !postDispatchedBranches.has(n))
+    _bvMark('todays_dispatches_ms', postDispatchedBranches?.size)
 
     let preEodBills = []
     if (preEodEligibleAfterDispatch.length) {
@@ -953,6 +974,7 @@ export async function GET(req) {
         })
         .filter(b => !postDispatchedBranches.has(b.branch_name))
     }
+    _bvMark('pre_eod_ms', preEodBills?.length)
 
     // 4b) Already-dispatched-today stock — the at_branch bills we just excluded
     //     because their branch already fired a consignment today. Not bookable
@@ -979,6 +1001,7 @@ export async function GET(req) {
         })
         .filter(b => postDispatchedBranches.has(b.branch_name))
     }
+    _bvMark('dispatched_today_ms', dispatchedTodayBills?.length)
 
     // 5) Booked Pending Dispatch — at_branch bills that are already attached
     //    to a booking (booking_id IS NOT NULL). These are "promises without
@@ -1008,6 +1031,7 @@ export async function GET(req) {
       if (bpErr) return Response.json({ error: bpErr.message }, { status: 500 })
       bookedPendingBills = (bp || []).map(b => ({ ...b, _origin_branch: b.branch_name, branch_name: b.current_branch || b.branch_name }))
     }
+    _bvMark('booked_pending_ms', bookedPendingBills?.length)
 
     // Booking metadata join — fetch the cal_quotas row each bill is attached
     // to so the UI can show "booked for [party] · by [user] · created [ts]".
@@ -1060,6 +1084,7 @@ export async function GET(req) {
       }
     }
 
+    _bvMark('booking_meta_ms')
     const bookedNonKlBills = bookedPendingBills.filter(b => (branchMeta[b.branch_name]?.region) !== 'Kerala')
     const bookedKlBills    = bookedPendingBills.filter(b => (branchMeta[b.branch_name]?.region) === 'Kerala')
 
@@ -1134,6 +1159,7 @@ export async function GET(req) {
     // filtered views of inflightWithArrival (same object refs), so stamping the
     // parent here — before groupByBranch snapshots the bills — covers all three.
     await stampConsignmentMeta(inflightWithArrival)
+    _bvMark('stamp_meta_ms')
 
     // Annotate each pending-booking branch row with the consignment-creation
     // summary (earliest/latest stamp + unique creators) so the collapsed
@@ -1254,6 +1280,7 @@ export async function GET(req) {
     // the consignment-created date. bookedT24/48/72 are filtered views of
     // bookedInflight (same refs), so stamping the parent before bookedSection.
     await stampConsignmentMeta(bookedInflight)
+    _bvMark('booked_bands_ms', bookedWindowBills?.length)
     // Section 7 (branch pre-EOD): booked at_branch bills at the eligible branches.
     const preEodOwnerSet = new Set(preEodEligibleAfterDispatch)
     const bookedPreEod = bookedWindowBills.filter(b => b.stock_status === 'at_branch' && preEodOwnerSet.has(b._owner))
@@ -1367,6 +1394,7 @@ export async function GET(req) {
         else klS1FromLeaf.push({ ...b, _at_hub: b.current_branch })  // group under origin leaf, tag hub
       }
     }
+    _bvMark('kerala_hub_stock_ms', (klS1HubOrigin?.length || 0) + (klS1FromLeaf?.length || 0))
 
     // S2 — bills sitting on an active INTERNAL consignment whose destination
     // is one of the Kerala hubs. Three-step fetch: consignments → items →
@@ -1384,6 +1412,7 @@ export async function GET(req) {
 
       const cIds  = (activeIntConsignments || []).map(c => c.id)
       const cMeta = Object.fromEntries((activeIntConsignments || []).map(c => [c.id, c]))
+      _bvMark('kerala_internal_runs_ms', activeIntConsignments?.length)
 
       if (cIds.length) {
         const { data: items, error: iErr } = await supabase
@@ -1391,6 +1420,7 @@ export async function GET(req) {
           .select('purchase_id, consignment_id')
           .in('consignment_id', cIds)
         if (iErr) return Response.json({ error: iErr.message }, { status: 500 })
+        _bvMark('kerala_items_ms', items?.length)
 
         const pIds = []
         for (const it of items || []) {
@@ -1427,6 +1457,7 @@ export async function GET(req) {
       }
     }
 
+    _bvMark('kerala_bills_ms', klS2Bills?.length)
     // S5 — at_branch at a Kerala leaf (not a hub), dispatch to hub yet to fire.
     let klS5Bills = []
     if (klLeafNames.length) {
@@ -1466,6 +1497,7 @@ export async function GET(req) {
       // it was actually bought at.
       klS3Bills = (s3 || []).filter(b => !klS2BillToConsignment[b.id])   // drop leaf→hub INTERNAL (those are S2)
     }
+    _bvMark('kerala_leaf_ms', (klS5Bills?.length || 0) + (klS3Bills?.length || 0))
 
     // S2 "may slip" heuristic — flag bills whose INTERNAL consignment was
     // created after the source leaf's published pickup_time + 2h buffer. They
@@ -1556,6 +1588,10 @@ export async function GET(req) {
     }
     const todays_purchases_by_region = Object.values(todaysByRegionMap)
       .sort((a, b) => b.net_wt - a.net_wt)
+
+    _bvMark('todays_region_rollup_ms', todaysPurchaseRows?.length)
+    _bvTimings.total_ms = Date.now() - _bvT0
+    console.log('[bidding_volume]', JSON.stringify(_bvTimings))
 
     return Response.json({
       data: {
