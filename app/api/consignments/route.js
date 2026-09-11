@@ -1286,15 +1286,23 @@ export async function GET(req) {
     const bookedT24 = bookedInflight.filter(b => b._arrival_date === arrivalDate)
     const bookedT48 = bookedInflight.filter(b => b._arrival_date === dayAfterArrival)
     const bookedT72 = bookedInflight.filter(b => b._arrival_date === dayAfter2Arrival)
-    _bvTimings.booked_inflight_prepare_ms = Date.now() - _bipStart
-    _bvTimings.booked_inflight_rows       = bookedInflight.length
+    // Only bookedT24/48/72 are exposed in the response (via bookedSection). Stamp
+    // just those bills — combined — instead of the full bookedInflight set, so no
+    // consignment_items lookup runs for booked in_consignment bills that fall
+    // outside the three arrival windows and are never returned. Same object refs
+    // (filter doesn't copy), and T24/48/72 are mutually exclusive by _arrival_date,
+    // so the returned rows are stamped identically with no duplicate work.
+    const bookedInflightVisible = [...bookedT24, ...bookedT48, ...bookedT72]
+    _bvTimings.booked_inflight_prepare_ms   = Date.now() - _bipStart
+    _bvTimings.booked_inflight_rows         = bookedInflight.length          // full total (compare)
+    _bvTimings.booked_inflight_visible_rows = bookedInflightVisible.length   // actually stamped
     // Stamp the ALREADY-BOOKED transit bills too, so their booked rows can show
     // the consignment-created date. bookedT24/48/72 are filtered views of
     // bookedInflight (same refs), so stamping the parent before bookedSection.
-    const _bisStart = Date.now()   // diag: ONLY the bookedInflight stamp call
-    await stampConsignmentMeta(bookedInflight)
+    const _bisStart = Date.now()   // diag: ONLY the booked-inflight stamp call
+    await stampConsignmentMeta(bookedInflightVisible)
     _bvTimings.booked_inflight_stamp_ms     = Date.now() - _bisStart
-    _bvTimings.booked_inflight_stamp_chunks = Math.ceil((bookedInflight.length || 0) / 100)
+    _bvTimings.booked_inflight_stamp_chunks = Math.ceil((bookedInflightVisible.length || 0) / 100)
     _bvTimings.booked_bands_total_ms        = Date.now() - _bbtStart
     _bvMark('booked_bands_ms', bookedWindowBills?.length)
     // Section 7 (branch pre-EOD): booked at_branch bills at the eligible branches.
