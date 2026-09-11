@@ -59,6 +59,22 @@ const CONSIGNMENT_ACTIVE_LIST_COLS = [
   'cancel_reason',
 ].join(', ')
 
+// Minimal column set for the DashboardHome Consignment Overview roll-up
+// (view=movement_rollup). EXACTLY the fields that widget reads — the in-movement
+// totals, the movement-by-state split (state_code), and the 14-day series
+// (created_at). Same row set as the plain action=consignments (only the
+// selected columns differ); deliberately EXCLUDES the heavy payload/audit
+// columns (cleartax_response, signed_qr_code, gst_rate_snapshot, etc.) that
+// bloat select('*') to ~17 MB. The plain action=consignments keeps select('*').
+const CONSIGNMENT_MOVEMENT_ROLLUP_COLS = [
+  'status',
+  'total_bills',
+  'total_net_wt',
+  'total_amount',
+  'state_code',
+  'created_at',
+].join(', ')
+
 // Purchase-date lock helper — returns the subset of `dates` (YYYY-MM-DD) that
 // fall inside any active lock range (bidding_purchase_date_locks). Used to block
 // booking of locked-date bills in create_booking + attach_selected_to_pipeline.
@@ -2841,10 +2857,16 @@ export async function GET(req) {
     const branch   = searchParams.get('branch')
     const dateFrom = searchParams.get('date_from')
     const dateTo   = searchParams.get('date_to')
-    // view=active_list (Consignment Data screen): select only the columns that
-    // screen reads, so the payload isn't bloated by heavy JSON columns. Any
-    // other caller (reports/other screens) keeps the full select('*') contract.
-    const cols     = searchParams.get('view') === 'active_list' ? CONSIGNMENT_ACTIVE_LIST_COLS : '*'
+    // view selects a lightweight COLUMN projection only — the row set (below),
+    // pagination, ordering, and region/branch/date behaviour are identical in
+    // every case; only the selected columns differ:
+    //   active_list      → Consignment Data screen (ConsignmentData.js)
+    //   movement_rollup  → DashboardHome Consignment Overview roll-up
+    //   (no view)        → full select('*') for reports/history/other callers
+    const view     = searchParams.get('view')
+    const cols     = view === 'active_list'     ? CONSIGNMENT_ACTIVE_LIST_COLS
+                   : view === 'movement_rollup' ? CONSIGNMENT_MOVEMENT_ROLLUP_COLS
+                   : '*'
 
     const buildQuery = () => {
       let q = supabase

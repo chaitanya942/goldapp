@@ -817,7 +817,7 @@ export default function DashboardHome() {
           authedFetch('/api/consignments?action=branch_overview&status=in_consignment&include_bangalore=true').then(r => r.json()).catch(() => ({ data: [] })),
           // Still pulled for the legacy roll-up fields (movementBills, etc).
           // The new region-grouped overview reads from in-transit rows above.
-          authedFetch('/api/consignments?action=consignments').then(r => r.json()).catch(() => ({ data: [] })),
+          authedFetch('/api/consignments?action=consignments&view=movement_rollup').then(r => r.json()).catch(() => ({ data: [] })),
         ]).then(([overview, transit, consignList]) => {
           const rows        = overview.data || []
           const transitRows = transit.data  || []  // per-branch in-transit roll-up
