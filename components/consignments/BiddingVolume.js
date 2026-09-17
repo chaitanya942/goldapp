@@ -616,10 +616,12 @@ export default function BiddingVolume() {
     amount:   a.amount   + (b.total_amount   || 0),
   }), { bills: 0, gross_wt: 0, net_wt: 0, amount: 0 })
   const dropKL = (arr) => (arr || []).filter(b => b.region !== 'Kerala')
+  const bangBooked   = useMemo(() => supply?.bangalore?.booked?.branches || [],        [supply])
   const t24Booked    = useMemo(() => dropKL(supply?.transit_24h?.booked?.branches),    [supply])
   const t48Booked    = useMemo(() => dropKL(supply?.transit_48h?.booked?.branches),    [supply])
   const t72Booked    = useMemo(() => dropKL(supply?.transit_72h?.booked?.branches),    [supply])
   const preEodBooked = useMemo(() => dropKL(supply?.branch_pre_eod?.booked?.branches), [supply])
+  const preEodDispatchedToday = useMemo(() => dropKL(supply?.branch_pre_eod?.dispatched_today), [supply])
 
   // Per-section metric cards (Total / Booked / Unbooked / Gain / Available).
   // Total = booked + unbooked; gain mirrors the % rate but is applied to the
@@ -732,8 +734,21 @@ export default function BiddingVolume() {
     collect(klS2Branches,     'kl_in_movement')
     collect(klS3Branches,     'kl_created_not_booked')
     collect(klS5Branches,     'kl_at_leaf')
+    // Already-booked / dispatched-today bills — selectable via checkbox in
+    // their read-only bands (so ops can e.g. attach them to a prior booking
+    // or, for dispatched-today, book the leftover stock anyway), but tagged
+    // with a group name that never matches autoSelectRemaining/selectSectionBills'
+    // pool keys — those only sweep the plain bookable groups above, so a
+    // one-click "Available to Book" never silently re-grabs an already-booked
+    // or next-cycle bill.
+    collect(bangBooked,            'bangalore_booked')
+    collect(t24Booked,             'transit_24h_booked')
+    collect(t48Booked,             'transit_48h_booked')
+    collect(t72Booked,             'transit_72h_booked')
+    collect(preEodBooked,          'branch_pre_eod_booked')
+    collect(preEodDispatchedToday, 'branch_pre_eod_dispatched_today')
     return m
-  }, [bangBranches, inTBranches, t48hBranches, t72hBranches, pendBookBranches, bangPendBranches, bangGainBranches, preEodBranches, klS1Branches, klS1LeafBranches, klS2Branches, klS3Branches, klS5Branches])
+  }, [bangBranches, inTBranches, t48hBranches, t72hBranches, pendBookBranches, bangPendBranches, bangGainBranches, preEodBranches, klS1Branches, klS1LeafBranches, klS2Branches, klS3Branches, klS5Branches, bangBooked, t24Booked, t48Booked, t72Booked, preEodBooked, preEodDispatchedToday])
 
   const selectedTotal = useMemo(() => {
     let s = 0
@@ -1708,7 +1723,7 @@ export default function BiddingVolume() {
         total={supply?.bangalore?.total}
         metrics={sectionMetrics(supply?.bangalore?.total?.net_wt, supply?.bangalore?.booked?.net_wt, 1)}
         pipelineG={pipelineOtherG}
-        bookedBranches={supply?.bangalore?.booked?.branches}
+        bookedBranches={bangBooked}
         onRateChange={(p) => handleSectionRate(1, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(1, g)}
         onAutoSelect={(dates) => selectSectionBills(['bangalore'], dates)}
@@ -1934,7 +1949,7 @@ export default function BiddingVolume() {
         total={sumBranches(preEodBranches)}
         metrics={sectionMetrics(sumBranches(preEodBranches).net_wt, sumBranches(preEodBooked).net_wt, 7)}
         bookedBranches={preEodBooked}
-        dispatchedTodayBranches={dropKL(supply?.branch_pre_eod?.dispatched_today)}
+        dispatchedTodayBranches={preEodDispatchedToday}
         onRateChange={(p) => handleSectionRate(7, p)}
         onSetGainGrams={(g) => handleSectionGainGrams(7, g)}
         onAutoSelect={(dates, alt, tats) => selectSectionBills(['branch_pre_eod'], dates, null, tats)}
@@ -3985,6 +4000,47 @@ function SourceSection({
   //   [checkbox] [name + chips ...........]  [gross]  [net]  [bills]  [▾]
   const rowGrid = '20px minmax(0, 1fr) 92px 100px 70px 22px'
 
+  // Outstation pickup + delivery chips for a branch — pickup time → pickup
+  // days → delivery TAT → earliest expected delivery. Shared by the main
+  // selectable list and the "already booked" / "dispatched today" bands so a
+  // checked branch there shows the same booking info as any other selectable
+  // row. The local Bangalore pool is same-day with no fixed pickup, so none
+  // of these render there.
+  const renderMetaChips = (b) => (
+    b.region !== 'Bangalore' && b.model_type !== 'bangalore' ? (
+      <>
+        {b.pickup_time && (
+          <span title={`Scheduled pickup time · ${fmtPickupTime(b.pickup_time)} (informational — pickups can run late)`}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
+              fontSize: 11, fontWeight: 700, letterSpacing: '.02em', whiteSpace: 'nowrap',
+              color: t.gold, background: `${t.gold}12`, border: `1px solid ${t.gold}3a`,
+              borderRadius: 6, padding: '3px 9px', lineHeight: 1.25 }}>
+            <span aria-hidden="true" style={{ fontSize: 10 }}>⏱</span>{fmtPickupTime(b.pickup_time)}
+          </span>
+        )}
+        <span style={{ display: 'inline-flex', width: 140, flexShrink: 0 }}>
+          <PickupDaysChip t={t} days={b.pickup_days} />
+        </span>
+        {b.tat_hours != null && (
+          <span title={`Delivery TAT ${b.tat_hours}h`} style={{ fontSize: 10.5, color: t.text3, background: `${t.text4}1c`, border: `1px solid ${t.text4}2e`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', flexShrink: 0 }}>{b.tat_hours}h TAT</span>
+        )}
+        {(() => {
+          const del = earliestDeliveryFor(b.pickup_days, b.tat_hours)
+          if (!del) return null
+          return (
+            <span title={`Earliest expected delivery at HO — ${del.pickIsToday ? 'today’s' : del.pickupDay} pickup + ${b.tat_hours}h TAT (Sundays skipped)`}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
+                fontSize: 11, fontWeight: 800, letterSpacing: '.02em', whiteSpace: 'nowrap',
+                color: t.green, background: `${t.green}12`, border: `1px solid ${t.green}3a`,
+                borderRadius: 6, padding: '3px 9px', lineHeight: 1.25 }}>
+              <span aria-hidden="true" style={{ fontSize: 10 }}>→</span>{del.day} {fmtDateShort(del.date)}
+            </span>
+          )
+        })()}
+      </>
+    ) : null
+  )
+
   // ── In-section case-wise export (respects the active filters) ─────────────
   const exportName = String(title || 'Section').replace(/[·•|/\\:]+/g, '-').replace(/\s+/g, ' ').trim()
   const gatherSectionCases = () => {
@@ -4586,45 +4642,7 @@ function SourceSection({
                               style={{ fontSize: 10, color: t.red, background: `${t.red}14`, border: `1px solid ${t.red}40`, borderRadius: 4, padding: '1px 7px', whiteSpace: 'nowrap', fontWeight: 800, flexShrink: 0 }}>🔒 {lk}</span>
                           ) : null
                         })()}
-                        {/* Outstation pickup + delivery chips, in the order ops
-                            reads them: pickup time → pickup days → delivery TAT →
-                            earliest expected delivery. The local Bangalore pool is
-                            same-day with no fixed pickup, so none of these show
-                            there (its TAT=0 chip was noise too). Values live in
-                            Branch Management. */}
-                        {b.region !== 'Bangalore' && b.model_type !== 'bangalore' && (
-                          <>
-                            {b.pickup_time && (
-                              <span title={`Scheduled pickup time · ${fmtPickupTime(b.pickup_time)} (informational — pickups can run late)`}
-                                style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
-                                  fontSize: 11, fontWeight: 700, letterSpacing: '.02em', whiteSpace: 'nowrap',
-                                  color: t.gold, background: `${t.gold}12`, border: `1px solid ${t.gold}3a`,
-                                  borderRadius: 6, padding: '3px 9px', lineHeight: 1.25 }}>
-                                <span aria-hidden="true" style={{ fontSize: 10 }}>⏱</span>{fmtPickupTime(b.pickup_time)}
-                              </span>
-                            )}
-                            <span style={{ display: 'inline-flex', width: 140, flexShrink: 0 }}>
-                              <PickupDaysChip t={t} days={b.pickup_days} />
-                            </span>
-                            {b.tat_hours != null && (
-                              <span title={`Delivery TAT ${b.tat_hours}h`} style={{ fontSize: 10.5, color: t.text3, background: `${t.text4}1c`, border: `1px solid ${t.text4}2e`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', flexShrink: 0 }}>{b.tat_hours}h TAT</span>
-                            )}
-                            {/* Earliest expected delivery at HO = next pickup day + TAT. */}
-                            {(() => {
-                              const del = earliestDeliveryFor(b.pickup_days, b.tat_hours)
-                              if (!del) return null
-                              return (
-                                <span title={`Earliest expected delivery at HO — ${del.pickIsToday ? 'today’s' : del.pickupDay} pickup + ${b.tat_hours}h TAT (Sundays skipped)`}
-                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
-                                    fontSize: 11, fontWeight: 800, letterSpacing: '.02em', whiteSpace: 'nowrap',
-                                    color: t.green, background: `${t.green}12`, border: `1px solid ${t.green}3a`,
-                                    borderRadius: 6, padding: '3px 9px', lineHeight: 1.25 }}>
-                                  <span aria-hidden="true" style={{ fontSize: 10 }}>→</span>{del.day} {fmtDateShort(del.date)}
-                                </span>
-                              )
-                            })()}
-                          </>
-                        )}
+                        {renderMetaChips(b)}
                         {(() => {
                           // Consignment-created date, derived from this branch's in-consignment
                           // bills. Shows a single date, or earliest→latest when they span days.
@@ -4953,10 +4971,21 @@ function SourceSection({
                       const gkey   = `bk:${b.branch_name}:${d}`
                       const gexp   = openBranches.has(gkey)
                       const isFirst = gi === 0
+                      const groupBranch = { ...b, bills: gbills }
+                      const gState   = selectable ? (branchSelectionState?.(groupBranch) || 'none') : 'none'
+                      const gChecked = gState === 'all'
+                      const gPartial = gState === 'partial'
+                      const gLocked  = selectable && branchLocked?.(groupBranch)
                       return (
                     <Fragment key={gkey}>
-                    <div style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '8px 11px', borderRadius: 8, opacity: 0.85 }}>
-                      <span style={{ width: 16, height: 16, borderRadius: 4, background: isFirst ? `${bk}22` : 'transparent', color: bk, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900 }}>{isFirst ? '✓' : ''}</span>
+                    <div
+                      onClick={() => { if (selectable && !gLocked) onToggleBranchAll?.(groupBranch) }}
+                      style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '8px 11px', borderRadius: 8, background: (gChecked || gPartial) ? `${bk}14` : 'transparent', cursor: selectable ? (gLocked ? 'not-allowed' : 'pointer') : 'default', opacity: gLocked ? 0.45 : 0.85 }}>
+                      {selectable ? (
+                        <span style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${(gChecked || gPartial) ? bk : t.border2}`, background: gChecked ? bk : (gPartial ? `${bk}55` : 'transparent'), display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: gChecked ? '#1a0a00' : bk, fontSize: 11, fontWeight: 900, transition: 'all .12s ease' }}>{gChecked ? '✓' : (gPartial ? '–' : '')}</span>
+                      ) : (
+                        <span style={{ width: 16, height: 16, borderRadius: 4, background: isFirst ? `${bk}22` : 'transparent', color: bk, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900 }}>{isFirst ? '✓' : ''}</span>
+                      )}
                       {/* name | consignment chip | booked chip — fixed slots so the
                           chips line up column-wise across every row. */}
                       <span style={{ display: 'grid', gridTemplateColumns: '150px 220px 1fr', alignItems: 'center', columnGap: 10, minWidth: 0 }}>
@@ -4967,14 +4996,15 @@ function SourceSection({
                         <span style={{ minWidth: 0, display: 'flex' }}>
                           {gclabel && <span title={`Consignment created on ${gclabel}`} style={chipSt(t.blue, { overflow: 'hidden', textOverflow: 'ellipsis' })}>Consignment created on {gclabel}</span>}
                         </span>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flexWrap: 'wrap' }}>
                           {d !== '—' && <span title={`Booked on ${fmtDateShort(d)}`} style={chipSt(bkGreen, { flexShrink: 0 })}>Booked on {fmtDateShort(d)}</span>}
+                          {renderMetaChips(b)}
                         </span>
                       </span>
                       <span style={{ textAlign: 'right', color: t.text3, fontWeight: 600 }}>{fmt(gGross, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
                       <span style={{ textAlign: 'right', color: bk, fontWeight: 800 }}>{fmt(gNet, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
                       <span style={{ textAlign: 'right', color: t.text3, fontWeight: 700 }}>{gbills.length} bill{gbills.length === 1 ? '' : 's'}</span>
-                      <span onClick={() => toggleBranchExpand(gkey)} title={gexp ? 'Hide bills' : 'Show bills'}
+                      <span onClick={(e) => { e.stopPropagation(); toggleBranchExpand(gkey) }} title={gexp ? 'Hide bills' : 'Show bills'}
                         style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 6, cursor: 'pointer', color: gexp ? bk : t.text3, fontSize: 13, fontWeight: 800, background: gexp ? `${bk}18` : 'transparent', border: `1px solid ${gexp ? `${bk}66` : 'transparent'}`, opacity: gbills.length === 0 ? 0.25 : 1, pointerEvents: gbills.length === 0 ? 'none' : 'auto' }}>
                         {gexp ? '▾' : '▸'}
                       </span>
@@ -5024,10 +5054,12 @@ function SourceSection({
             )
           })()}
 
-          {/* Dispatched-today band (read-only). These branches already fired a
-              consignment today, so their leftover at_branch stock isn't bookable
-              (it's tomorrow's cycle) — shown only in the 'All' pickup view so ops
-              can still SEE the stock. Unselectable. */}
+          {/* Dispatched-today band. These branches already fired a consignment
+              today, so their leftover at_branch stock normally rides
+              tomorrow's cycle — shown only in the 'All' pickup view so ops
+              can still see the stock. When the section is selectable, ops can
+              still tick a branch here to book the leftover stock today anyway
+              (overriding the next-cycle default). */}
           {dispRows.length > 0 && (() => {
             const dk = t.gold
             return (
@@ -5042,24 +5074,37 @@ function SourceSection({
                   <span style={{ fontSize: 11, color: t.text3, fontFamily: 'monospace', fontWeight: 700 }}>
                     {fmt(dispNet, 2)} g · {dispBills} bill{dispBills === 1 ? '' : 's'}
                   </span>
-                  <span style={{ fontSize: 10, color: t.text4, fontStyle: 'italic' }}>not bookable — next cycle</span>
+                  <span style={{ fontSize: 10, color: t.text4, fontStyle: 'italic' }}>
+                    {selectable ? 'normally next cycle — tick a branch to book it today anyway' : 'not bookable — next cycle'}
+                  </span>
                 </div>
                 {dispatchedOpen && dispRows.map(b => {
                   const bexp   = openBranches.has('dt:' + b.branch_name)
                   const bbills = Array.isArray(b.bills) ? b.bills : []
                   const dtCols = '78px 130px minmax(0, 1fr) 100px 100px 130px'
+                  const dState   = selectable ? (branchSelectionState?.(b) || 'none') : 'none'
+                  const dChecked = dState === 'all'
+                  const dPartial = dState === 'partial'
+                  const dLocked  = selectable && branchLocked?.(b)
                   return (
                     <Fragment key={`dt-${b.branch_name}`}>
-                    <div style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '8px 11px', borderRadius: 8, opacity: 0.8 }}>
-                      <span style={{ width: 16, height: 16, borderRadius: 4, background: `${dk}22`, color: dk, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900 }}>↗</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                    <div
+                      onClick={() => { if (selectable && !dLocked) onToggleBranchAll?.(b) }}
+                      style={{ display: 'grid', gridTemplateColumns: rowGrid, alignItems: 'center', columnGap: 14, padding: '8px 11px', borderRadius: 8, background: (dChecked || dPartial) ? `${dk}14` : 'transparent', cursor: selectable ? (dLocked ? 'not-allowed' : 'pointer') : 'default', opacity: dLocked ? 0.45 : 0.8 }}>
+                      {selectable ? (
+                        <span style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${(dChecked || dPartial) ? dk : t.border2}`, background: dChecked ? dk : (dPartial ? `${dk}55` : 'transparent'), display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: dChecked ? '#1a0a00' : dk, fontSize: 11, fontWeight: 900, transition: 'all .12s ease' }}>{dChecked ? '✓' : (dPartial ? '–' : '')}</span>
+                      ) : (
+                        <span style={{ width: 16, height: 16, borderRadius: 4, background: `${dk}22`, color: dk, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900 }}>↗</span>
+                      )}
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flexWrap: 'wrap' }}>
                         <span style={{ fontSize: 13, color: t.text2, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.branch_name}</span>
                         <span title="This branch already dispatched a consignment today" style={{ fontSize: 10.5, color: dk, background: `${dk}14`, border: `1px solid ${dk}33`, borderRadius: 4, padding: '1px 8px', whiteSpace: 'nowrap', fontWeight: 700, letterSpacing: '.03em', flexShrink: 0 }}>dispatched today</span>
+                        {renderMetaChips(b)}
                       </span>
                       <span style={{ textAlign: 'right', color: t.text3, fontWeight: 600 }}>{fmt(b.total_gross_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
                       <span style={{ textAlign: 'right', color: dk, fontWeight: 800 }}>{fmt(b.total_net_wt, 2)}<span style={{ fontSize: 10, color: t.text4, marginLeft: 2 }}>g</span></span>
                       <span style={{ textAlign: 'right', color: t.text3, fontWeight: 700 }}>{b.total_bills} bill{b.total_bills === 1 ? '' : 's'}</span>
-                      <span onClick={() => toggleBranchExpand('dt:' + b.branch_name)} title={bexp ? 'Hide bills' : 'Show bills'}
+                      <span onClick={(e) => { e.stopPropagation(); toggleBranchExpand('dt:' + b.branch_name) }} title={bexp ? 'Hide bills' : 'Show bills'}
                         style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 6, cursor: 'pointer', color: bexp ? dk : t.text3, fontSize: 13, fontWeight: 800, background: bexp ? `${dk}18` : 'transparent', border: `1px solid ${bexp ? `${dk}66` : 'transparent'}`, opacity: bbills.length === 0 ? 0.25 : 1, pointerEvents: bbills.length === 0 ? 'none' : 'auto' }}>
                         {bexp ? '▾' : '▸'}
                       </span>
