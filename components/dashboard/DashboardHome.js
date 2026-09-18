@@ -152,11 +152,12 @@ function ConsignmentBalanceView({ t, stats, isMobile, setActiveNav }) {
   const [filterRegion,    setFilterRegion]    = useState('all')
   const [expandedStock,   setExpandedStock]   = useState(() => new Set())
   const [expandedTransit, setExpandedTransit] = useState(() => new Set())
-  // Date filter — Today / Yesterday / Last Week / Custom range / All
-  // (default). Applies to both Branch In Stock and In Transit at once,
-  // re-aggregating from the per-(branch, purchase_date) breakdown rather
-  // than re-fetching, so switching presets is instant.
-  const [dateMode,   setDateMode]   = useState('all')
+  // Date filter — Today (default, matches the rest of the dashboard's
+  // "today" default) / Yesterday / Last Week / Custom range / All. Applies
+  // to both Branch In Stock and In Transit at once, re-aggregating from the
+  // per-(branch, purchase_date) breakdown rather than re-fetching, so
+  // switching presets is instant.
+  const [dateMode,   setDateMode]   = useState('today')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo,   setCustomTo]   = useState('')
 
