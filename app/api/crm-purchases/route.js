@@ -583,8 +583,15 @@ export async function GET(req) {
     if (action === 'live') {
       const istNow  = new Date(Date.now() + 5.5 * 60 * 60 * 1000)
       const defaultIST = istNow.toISOString().split('T')[0]
-      // Allow explicit date override via ?date=; default to today IST
-      const todayIST = searchParams.get('date') || defaultIST
+      // Single-day mode (default): ?date= or nothing → a snapshot of one day.
+      // Range mode (e.g. "Last Week"): ?from=&to= aggregates across every day
+      // in the range, inclusive. When only `date` is given, from/to both
+      // resolve to it, so every query below (BETWEEN fromIST AND toIST)
+      // degenerates to exactly the old single-day behaviour.
+      const singleDate = searchParams.get('date') || defaultIST
+      const fromIST = searchParams.get('from') || singleDate
+      const toIST   = searchParams.get('to')   || singleDate
+      const todayIST = fromIST   // legacy alias — still means "the day/window start" below
 
       // Supabase branches + all old-CRM queries run in parallel
       const [
@@ -629,8 +636,8 @@ export async function GET(req) {
               THEN 1 ELSE 0
             END)                                                                        AS invalid_weight_count
           FROM customer_walkin
-          WHERE DATE(date + INTERVAL 330 MINUTE) = ?
-        `, [todayIST]),
+          WHERE DATE(date + INTERVAL 330 MINUTE) BETWEEN ? AND ?
+        `, [fromIST, toIST]),
 
         // 2. Raw ornment rows (grms_wet is CSV) — summed in JS per status + type_gold
         conn.execute(`
@@ -638,8 +645,8 @@ export async function GET(req) {
             (t.finl_amnt+0) AS amount, o.grms_wet
           FROM transac_tbl t
           LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
-          WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
-        `, [todayIST]),
+          WHERE DATE(t.date + INTERVAL 330 MINUTE) BETWEEN ? AND ?
+        `, [fromIST, toIST]),
 
         // 3. Branch breakdown
         conn.execute(`
@@ -653,13 +660,16 @@ export async function GET(req) {
             ROUND(SUM(CASE WHEN t.trxn_status='approved' THEN (t.finl_amnt+0) ELSE 0 END), 0) AS value
           FROM transac_tbl t
           LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
-          WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
+          WHERE DATE(t.date + INTERVAL 330 MINUTE) BETWEEN ? AND ?
           GROUP BY t.branch_id, b.brnch_name
           ORDER BY value DESC
           LIMIT 40
-        `, [todayIST]),
+        `, [fromIST, toIST]),
 
-        // 4. Hourly activity
+        // 4. Hourly activity. In range mode (multi-day) this buckets every
+        // day's activity into the same 24 hour-of-day slots — a combined
+        // "what hour do customers usually arrive" view across the range,
+        // not a single day's timeline.
         conn.execute(`
           SELECT
             HOUR(TIME(date + INTERVAL 330 MINUTE)) AS hour,
@@ -667,11 +677,14 @@ export async function GET(req) {
             SUM(CASE WHEN trxn_status='approved' THEN 1 ELSE 0 END) AS approved,
             SUM(CASE WHEN trxn_status='rejected' THEN 1 ELSE 0 END) AS rejected
           FROM transac_tbl
-          WHERE DATE(date + INTERVAL 330 MINUTE) = ?
+          WHERE DATE(date + INTERVAL 330 MINUTE) BETWEEN ? AND ?
           GROUP BY hour ORDER BY hour
-        `, [todayIST]),
+        `, [fromIST, toIST]),
 
-        // 5. Today's transactions — GROUP BY transaction so each bill is one row
+        // 5. Today's transactions — GROUP BY transaction so each bill is one row.
+        // LIMIT is generous enough to comfortably cover a full week's bills
+        // without truncating (truncation here would silently under-count the
+        // summary/goldPipeline aggregates built from this array below).
         conn.execute(`
           SELECT t.id, t.bill_no, t.cust_name, t.cust_mobile,
             DATE(t.date + INTERVAL 330 MINUTE) AS txn_date,
@@ -687,11 +700,11 @@ export async function GET(req) {
           FROM transac_tbl t
           LEFT JOIN branch_tbl b ON b.brnch_id = t.branch_id
           LEFT JOIN ornments_tbl o ON o.trnxnn_id = t.id
-          WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
+          WHERE DATE(t.date + INTERVAL 330 MINUTE) BETWEEN ? AND ?
           GROUP BY t.id
           ORDER BY t.time DESC
-          LIMIT 500
-        `, [todayIST]),
+          LIMIT 5000
+        `, [fromIST, toIST]),
 
         // 6. Today's walk-ins for timeline
         conn.execute(`
@@ -700,8 +713,9 @@ export async function GET(req) {
             cw.walk_reason, cw.source, cw.cust_rmrks,
             cw.branch_id, b.brnch_name AS branch_name,
             -- Re-walk-in = repeat visitor: this customer's phone also shows up in
-            -- an EARLIER walk-in record. Blank/null mobiles are excluded so they
-            -- don't all match each other. (1 = re-walk-in, 0 = fresh.)
+            -- an EARLIER walk-in record (before the viewed window starts).
+            -- Blank/null mobiles are excluded so they don't all match each
+            -- other. (1 = re-walk-in, 0 = fresh.)
             (prev.cust_mobile IS NOT NULL) AS re_walkin
           FROM customer_walkin cw
           LEFT JOIN branch_tbl b ON b.brnch_id = cw.branch_id
@@ -710,9 +724,9 @@ export async function GET(req) {
             WHERE DATE(date + INTERVAL 330 MINUTE) < ?
               AND cust_mobile IS NOT NULL AND cust_mobile <> ''
           ) prev ON prev.cust_mobile = cw.cust_mobile
-          WHERE DATE(cw.date + INTERVAL 330 MINUTE) = ?
+          WHERE DATE(cw.date + INTERVAL 330 MINUTE) BETWEEN ? AND ?
           ORDER BY cw.time DESC
-        `, [todayIST, todayIST]),
+        `, [fromIST, fromIST, toIST]),
 
         // 7. KYC blacklisted today — full detail for region filter + detail table
         conn.execute(`
@@ -721,8 +735,8 @@ export async function GET(req) {
             b.brnch_name AS branch_name
           FROM rejctd_tbl r
           LEFT JOIN branch_tbl b ON b.brnch_id = r.branh_id
-          WHERE DATE(r.date + INTERVAL 330 MINUTE) = ?
-        `, [todayIST]),
+          WHERE DATE(r.date + INTERVAL 330 MINUTE) BETWEEN ? AND ?
+        `, [fromIST, toIST]),
 
         // 8. Takeover bills today + original walk-in date from customer_walkin history
         conn.execute(`
@@ -746,10 +760,10 @@ export async function GET(req) {
             FROM customer_walkin
             GROUP BY cust_mobile
           ) prev ON prev.cust_mobile = t.cust_mobile
-          WHERE DATE(t.date + INTERVAL 330 MINUTE) = ?
+          WHERE DATE(t.date + INTERVAL 330 MINUTE) BETWEEN ? AND ?
             AND t.type_gold = 'released'
           ORDER BY t.time DESC
-        `, [todayIST]).catch(() => [[]]),
+        `, [fromIST, toIST]).catch(() => [[]]),
       ])
 
       // Build region maps from parallel-fetched Supabase data
@@ -988,8 +1002,8 @@ export async function GET(req) {
           max:      1,
         })
 
-        const todayStart = `${todayIST}T00:00:00+05:30`
-        const todayEnd   = `${todayIST}T23:59:59+05:30`
+        const todayStart = `${fromIST}T00:00:00+05:30`
+        const todayEnd   = `${toIST}T23:59:59+05:30`
 
         const [stageRows, txnRows, completedTodayRows] = await Promise.all([
           // Stage counts.
@@ -1105,7 +1119,7 @@ export async function GET(req) {
             LEFT JOIN leadw  ld ON ld.tid = t.id
             WHERE t.created_at BETWEEN ${todayStart} AND ${todayEnd}
             ORDER BY t.created_at DESC
-            LIMIT 1000
+            LIMIT 7000
           `,
 
           // COMPLETED PURCHASES today — dated by the FINAL PAYMENT date (the day
@@ -1140,10 +1154,11 @@ export async function GET(req) {
                    COALESCE(NULLIF(q.final_amount,0), 0)::float AS amount,
                    COALESCE(orn.g, 0)::float AS gross_weight,
                    COALESCE(orn.n, 0)::float AS net_weight,
-                   -- re_walkin = walked in on an EARLIER day but closed today (the
-                   -- walk-in/created date differs from the final-payment day). These
-                   -- aren't in "Total Today" (created today) — counted as re-walk-ins.
-                   ((t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date <> ${todayIST}::date) AS re_walkin
+                   -- re_walkin = walked in BEFORE this window started but closed
+                   -- within it (the walk-in/created date is earlier than the
+                   -- window's first day). These aren't in "Total" (created
+                   -- within the window) — counted as re-walk-ins instead.
+                   ((t.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date < ${fromIST}::date) AS re_walkin
             FROM "Transaction" t
             LEFT JOIN "Branch" b ON b.id = t.branch_id
             LEFT JOIN "Customer" c ON c.id = t.customer_id
@@ -1155,7 +1170,7 @@ export async function GET(req) {
               WHERE transaction_id = t.id AND status = 'COMPLETED' AND type = 'FINAL_PAYMENT'
             ) fpay ON true
             WHERE t.status = 'FINAL_PAYMENT_COMPLETED'
-              AND (fpay.fp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date = ${todayIST}::date
+              AND (fpay.fp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata')::date BETWEEN ${fromIST}::date AND ${toIST}::date
           `,
         ])
 
@@ -1193,6 +1208,9 @@ export async function GET(req) {
 
       return Response.json({
         todayIST,
+        fromIST,
+        toIST,
+        isRange: fromIST !== toIST,
         summary,
         walkinSummary,
         goldPipeline,

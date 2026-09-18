@@ -5,7 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
 import Badge from '../ui/Badge'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
-import { istNow, istStr } from '../../lib/dateIst'
+import { istNow, istStr, istLastWeekRange } from '../../lib/dateIst'
 import { getCache, setCache } from '../../lib/moduleCache'
 import { appIdVariants } from '../../lib/appIdSearch'
 
@@ -354,14 +354,10 @@ export default function PurchaseData() {
   const setYesterday = () => { const d = istNow(); d.setDate(d.getDate() - 1); const s = istStr(d); setFromDate(s); setToDate(s); setPage(0) }
   const setThisWeek = () => { const to = istNow(); const fr = istNow(); fr.setDate(fr.getDate() - 7); setToDate(istStr(to)); setFromDate(istStr(fr)); setPage(0) }
   // Last Week = the previous COMPLETED calendar week (Mon–Sun), never the
-  // current week. Weeks are Monday-start, matching the dashboard's getRange().
+  // current week.
   const setLastWeek = () => {
-    const now = istNow()
-    const off = now.getDay() === 0 ? 6 : now.getDay() - 1   // days since this week's Monday
-    const thisMonday = istNow(); thisMonday.setDate(thisMonday.getDate() - off)
-    const lastSunday = new Date(thisMonday); lastSunday.setDate(lastSunday.getDate() - 1)
-    const lastMonday = new Date(lastSunday); lastMonday.setDate(lastMonday.getDate() - 6)
-    setFromDate(istStr(lastMonday)); setToDate(istStr(lastSunday)); setPage(0)
+    const { from, to } = istLastWeekRange()
+    setFromDate(from); setToDate(to); setPage(0)
   }
   const setThisMonth = () => { const now = istNow(); setFromDate(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`); setToDate(istStr(now)); setPage(0) }
   const clearFilters = () => { setFromDate(''); setToDate(''); setDispatchedFrom(''); setDispatchedTo(''); setFilterBranch(''); setFilterStatus(''); setFilterTxn(''); setSearch(''); setSearchInput(''); setFilterCrmStatus(''); setFilterCrmSource(''); setPage(0) }

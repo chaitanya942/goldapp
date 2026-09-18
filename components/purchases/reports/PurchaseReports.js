@@ -14,7 +14,7 @@ import ReportCrmInsights from './ReportCrmInsights'
 import ReportComparePeriods from './ReportComparePeriods'
 import ReportUnderperformers from './ReportUnderperformers'
 import { authedFetch } from '../../../lib/authedFetch'
-import { istNow, istStr } from '../../../lib/dateIst'
+import { istNow, istStr, istLastWeekRange } from '../../../lib/dateIst'
 import { getCache, setCache } from '../../../lib/moduleCache'
 
 // Cache key for the report aggregates — keyed by every filter that changes
@@ -407,6 +407,12 @@ export default function PurchaseReports() {
   const setToday      = () => { const d = istStr(); setFromDate(d); setToDate(d) }
   const setYesterday  = () => { const d = istNow(); d.setDate(d.getDate() - 1); const s2 = istStr(d); setFromDate(s2); setToDate(s2) }
   const setQuickRange = (days) => { const to = istNow(); const fr = istNow(); fr.setDate(fr.getDate() - days); setToDate(istStr(to)); setFromDate(istStr(fr)) }
+  // Last Week = the previous COMPLETED calendar week (Mon–Sun), never the
+  // current week.
+  const setLastWeek = () => {
+    const { from, to } = istLastWeekRange()
+    setFromDate(from); setToDate(to)
+  }
   const setThisMonth  = () => { const now = istNow(); setFromDate(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`); setToDate(istStr(now)) }
 
   // For UX (Clear filters button visibility): a region pinned by region scoping isn't a "user-applied" filter.
@@ -504,6 +510,7 @@ export default function PurchaseReports() {
           {[
             ['Today',      setToday],
             ['Yesterday',  setYesterday],
+            ['Last Week',  setLastWeek],
             ['7D',         () => setQuickRange(7)],
             ['30D',        () => setQuickRange(30)],
             ['90D',        () => setQuickRange(90)],

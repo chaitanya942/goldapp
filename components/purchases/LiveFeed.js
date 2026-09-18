@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useApp, useRegionAccess } from '../../lib/context'
 import { authedFetch } from '../../lib/authedFetch'
-import { istToday } from '../../lib/dateIst'
+import { istToday, istLastWeekRange } from '../../lib/dateIst'
 import { getCache, setCache } from '../../lib/moduleCache'
 import LiveFeedVisuals from './LiveFeedVisuals'
 
@@ -178,7 +178,16 @@ export default function LiveFeed() {
   const todayIST = istToday()
 
   const [viewDate,      setViewDate]      = useState(todayIST)
-  const isToday = viewDate === todayIST
+  // 'day' = the single-date picker below (default, live). 'week' = the
+  // "Last Week" aggregated view — a Mon–Sun range fetched via from/to
+  // instead of a single date. Picking an explicit date always switches
+  // back to 'day' so the existing single-day picker stays unchanged.
+  const [viewMode,      setViewMode]      = useState('day')
+  const [weekRange,     setWeekRange]     = useState(null)   // { from, to } when viewMode === 'week'
+  const isToday = viewMode === 'day' && viewDate === todayIST
+  const periodLabel = viewMode === 'week' && weekRange
+    ? `${fmtDate(weekRange.from)} → ${fmtDate(weekRange.to)}`
+    : fmtDate(viewDate)
   // Default to NEW CRM (fall back to whatever the user can actually see).
   const [crmTab,        setCrmTab]        = useState(() =>
     canSee('livefeed.new_crm_tab') ? 'new'
@@ -210,17 +219,19 @@ export default function LiveFeed() {
   const [newEventCount, setNewEventCount] = useState(0)
 
   /* ── Load data ── */
-  const load = useCallback(async (date) => {
-    const d = date || viewDate
+  const load = useCallback(async () => {
+    const isWeek = viewMode === 'week' && weekRange
+    const qs = isWeek ? `from=${weekRange.from}&to=${weekRange.to}` : `date=${viewDate}`
+    const cacheKey = isWeek ? `livefeed:week:${weekRange.from}:${weekRange.to}` : `livefeed:${viewDate}`
     const seq = ++loadSeqRef.current
     try {
       setLoading(true)
       setLoadError(null)
-      const res = await authedFetch(`/api/crm-purchases?action=live&date=${d}`)
+      const res = await authedFetch(`/api/crm-purchases?action=live&${qs}`)
       const json = await res.json()
       if (seq !== loadSeqRef.current) return  // superseded by a newer load
       if (json.error) throw new Error(json.error)
-      setCache(`livefeed:${d}`, json)
+      setCache(cacheKey, json)
       setData(json)
       setLastUpdated(new Date())
     } catch (e) {
@@ -230,7 +241,7 @@ export default function LiveFeed() {
     } finally {
       if (seq === loadSeqRef.current) setLoading(false)
     }
-  }, [viewDate])
+  }, [viewDate, viewMode, weekRange])
 
   /* ── Auto-refresh ── */
   useEffect(() => {
@@ -407,7 +418,7 @@ export default function LiveFeed() {
               </span>
             )}
             <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: isMobile ? '.72rem' : '.82rem', fontWeight: 600, color: t.text1 }}>
-              {isMobile ? 'LIVE' : 'LIVE FEED'}
+              {viewMode === 'week' ? (isMobile ? 'LAST WK' : 'LAST WEEK') : (isMobile ? 'LIVE' : 'LIVE FEED')}
             </span>
           </div>
 
@@ -433,12 +444,42 @@ export default function LiveFeed() {
 
           <div style={{ flex: 1 }} />
 
-          {/* Date picker */}
+          {/* Date picker — picking an explicit date always drops back to
+              single-day mode, even if "Last Week" is currently active. */}
           {canSee('livefeed.date_picker') && (
             <input type="date" value={viewDate}
-              onChange={e => { const nd = e.target.value; setViewDate(nd); setRegionFilter(''); setNewEventCount(0); setData(getCache(`livefeed:${nd}`) ?? null) }}
+              onChange={e => { const nd = e.target.value; setViewMode('day'); setWeekRange(null); setViewDate(nd); setRegionFilter(''); setNewEventCount(0); setData(getCache(`livefeed:${nd}`) ?? null) }}
               style={{ background: t.card, color: t.text2, border: `1px solid ${t.border}`, borderRadius: 6, padding: '5px 8px', fontSize: '.68rem', fontFamily: 'ui-monospace, monospace', outline: 'none', cursor: 'pointer', maxWidth: isMobile ? 130 : 'none' }}
             />
+          )}
+
+          {/* Last Week — previous completed Mon–Sun calendar week, aggregated
+              into one view (never the current week). Click again to toggle
+              back to the single-day picker's current date. */}
+          {canSee('livefeed.date_picker') && (
+            <button
+              onClick={() => {
+                if (viewMode === 'week') {
+                  setViewMode('day'); setWeekRange(null)
+                  setData(getCache(`livefeed:${viewDate}`) ?? null)
+                } else {
+                  const range = istLastWeekRange()
+                  setWeekRange(range); setViewMode('week')
+                  setData(getCache(`livefeed:week:${range.from}:${range.to}`) ?? null)
+                }
+                setRegionFilter(''); setNewEventCount(0)
+              }}
+              title="Previous completed Monday–Sunday week"
+              style={{
+                background: viewMode === 'week' ? t.gold : t.card,
+                color: viewMode === 'week' ? '#000' : t.text3,
+                border: `1px solid ${viewMode === 'week' ? t.gold : t.border}`,
+                borderRadius: 6, padding: isMobile ? '5px 8px' : '5px 10px',
+                fontSize: '.65rem', fontWeight: viewMode === 'week' ? 700 : 400,
+                cursor: 'pointer', whiteSpace: 'nowrap', letterSpacing: '.02em',
+              }}>
+              Last Week
+            </button>
           )}
 
           {/* Refresh */}
@@ -513,9 +554,11 @@ export default function LiveFeed() {
         }}>
           <span style={{ fontSize: '.75rem', color: t.orange }}>📅</span>
           <span style={{ fontSize: '.68rem', color: t.orange, fontWeight: 600 }}>
-            Historical view — {fmtDate(viewDate)}
+            {viewMode === 'week' ? 'Last Week' : 'Historical view'} — {periodLabel}
           </span>
-          <span style={{ fontSize: '.62rem', color: t.text4 }}>Auto-refresh paused · showing data as of end of day</span>
+          <span style={{ fontSize: '.62rem', color: t.text4 }}>
+            {viewMode === 'week' ? 'Aggregated across the whole week · auto-refresh paused' : 'Auto-refresh paused · showing data as of end of day'}
+          </span>
         </div>
       )}
 
@@ -541,14 +584,14 @@ export default function LiveFeed() {
               takeoverRows={takeoverRows}
               regionFilter={regionFilter}
               filteredTimeline={filteredTimeline} isToday={isToday}
-              viewDate={viewDate}
+              viewDate={periodLabel}
               newEventCount={newEventCount} clearNewEvents={() => setNewEventCount(0)} />
           </div>
         ) : crmTab === 'new' ? (
           <div style={{ opacity: loading && data ? 0.6 : 1, transition: 'opacity .3s' }}>
             <NewCrmTab t={t} stages={stages} newCrmTxns={newCrmTxns} completedToday={newCrmCompletedToday} newCrmError={newCrmError}
               regionFilter={regionFilter} regions={regions}
-              viewDate={viewDate} isToday={isToday}
+              viewDate={periodLabel} isToday={isToday}
               showVisuals={showVisuals} onExitVisuals={() => setShowVisuals(false)}
               newEventCount={newEventCount} clearNewEvents={() => setNewEventCount(0)} />
           </div>
@@ -571,7 +614,7 @@ export default function LiveFeed() {
               /* New CRM props */
               stages={stages} newCrmTxns={newCrmTxns} newCrmCompletedToday={newCrmCompletedToday} newCrmError={newCrmError}
               /* Shared */
-              isToday={isToday} viewDate={viewDate}
+              isToday={isToday} viewDate={periodLabel}
               newEventCount={newEventCount} clearNewEvents={() => setNewEventCount(0)} />
           </div>
         )}
