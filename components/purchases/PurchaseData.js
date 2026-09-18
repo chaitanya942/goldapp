@@ -353,6 +353,16 @@ export default function PurchaseData() {
   const setToday = () => { const d = istStr(); setFromDate(d); setToDate(d); setPage(0) }
   const setYesterday = () => { const d = istNow(); d.setDate(d.getDate() - 1); const s = istStr(d); setFromDate(s); setToDate(s); setPage(0) }
   const setThisWeek = () => { const to = istNow(); const fr = istNow(); fr.setDate(fr.getDate() - 7); setToDate(istStr(to)); setFromDate(istStr(fr)); setPage(0) }
+  // Last Week = the previous COMPLETED calendar week (Mon–Sun), never the
+  // current week. Weeks are Monday-start, matching the dashboard's getRange().
+  const setLastWeek = () => {
+    const now = istNow()
+    const off = now.getDay() === 0 ? 6 : now.getDay() - 1   // days since this week's Monday
+    const thisMonday = istNow(); thisMonday.setDate(thisMonday.getDate() - off)
+    const lastSunday = new Date(thisMonday); lastSunday.setDate(lastSunday.getDate() - 1)
+    const lastMonday = new Date(lastSunday); lastMonday.setDate(lastMonday.getDate() - 6)
+    setFromDate(istStr(lastMonday)); setToDate(istStr(lastSunday)); setPage(0)
+  }
   const setThisMonth = () => { const now = istNow(); setFromDate(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`); setToDate(istStr(now)); setPage(0) }
   const clearFilters = () => { setFromDate(''); setToDate(''); setDispatchedFrom(''); setDispatchedTo(''); setFilterBranch(''); setFilterStatus(''); setFilterTxn(''); setSearch(''); setSearchInput(''); setFilterCrmStatus(''); setFilterCrmSource(''); setPage(0) }
 
@@ -617,6 +627,7 @@ export default function PurchaseData() {
           ['Today', setToday],
           ['Yesterday', setYesterday],
           ['This Week', setThisWeek],
+          ['Last Week', setLastWeek],
           ['This Month', setThisMonth],
         ].map(([label, fn]) => (
           <button key={label} onClick={fn}
