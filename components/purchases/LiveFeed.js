@@ -407,8 +407,10 @@ export default function LiveFeed() {
         borderBottom: isToday ? `1px solid ${t.border}` : `1px solid ${t.orange}50`,
         boxShadow: isToday ? '0 2px 12px rgba(0,0,0,.15)' : `0 2px 12px ${t.orange}18`,
       }}>
-        {/* Row 1: label + tabs + date + refresh */}
-        <div style={{ padding: isMobile ? '10px 14px' : '11px 24px', display: 'flex', alignItems: 'center', gap: isMobile ? 10 : 16 }}>
+        {/* Row 1: label + tabs + date + refresh. Wraps to a second line
+            instead of clipping/overflowing once the toolbar has more
+            controls than fit one row (e.g. narrower desktop widths). */}
+        <div style={{ padding: isMobile ? '10px 14px' : '11px 24px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: isMobile ? 10 : 16, rowGap: 8 }}>
           {/* Live indicator */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             {isToday && (

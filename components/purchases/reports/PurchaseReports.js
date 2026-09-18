@@ -505,8 +505,10 @@ export default function PurchaseReports() {
         zIndex: isMobile ? 30 : 'auto',
         backdropFilter: isMobile ? 'blur(8px)' : 'none',
       }}>
-        {/* Quick range pills — horizontal scroll on mobile */}
-        <div style={{ display: 'flex', gap: '5px', overflowX: 'auto', scrollbarWidth: 'none', marginBottom: '10px', paddingBottom: '2px' }}>
+        {/* Quick range pills — horizontal scroll strip on mobile, wraps to a
+            second line on desktop so a growing pill list never clips off the
+            edge of the (scrollbar-hidden) container. */}
+        <div style={{ display: 'flex', gap: '5px', flexWrap: isMobile ? 'nowrap' : 'wrap', overflowX: isMobile ? 'auto' : 'visible', scrollbarWidth: 'none', marginBottom: '10px', paddingBottom: '2px' }}>
           {[
             ['Today',      setToday],
             ['Yesterday',  setYesterday],
