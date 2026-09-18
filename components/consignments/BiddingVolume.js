@@ -31,8 +31,9 @@ import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
 import { istToday, istDaysAgo, addWorkingDaysSkipSunday, istStartOfDayIso, istEndOfDayIso, fromUtcDate } from '../../lib/dateIst'
 import {
-  ResponsiveContainer, ComposedChart, Line, Scatter,
+  ResponsiveContainer, ComposedChart, Line,
   XAxis, YAxis, CartesianGrid,
+  useXAxisScale, useYAxisScale,
 } from 'recharts'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -2901,23 +2902,44 @@ function clusterBookings(sorted) {
   }))
 }
 
-// Purely visual — click/hover are wired on <Scatter> itself (see
-// BookingRateChart), not here. A custom recharts `shape` doesn't reliably
-// receive its own pointer events; the parent <Scatter>'s onClick/onMouseEnter
-// props are the documented, reliable way to get per-point interactivity.
-function BookingMarkerDot({ cx, cy, payload, t, isSelected }) {
-  if (cx == null || cy == null) return null
-  const anyActive = payload.members.some(m => m.status !== 'cancelled')
-  const color = payload.count > 1 ? t.blue : (STATUS_META[payload.members[0].status]?.color || t.gold)
-  const r = Math.min(11, 5 + (payload.count - 1) * 1.5)
+// Renders the booking markers as a plain child of <ComposedChart>, reading
+// recharts' OWN computed axis scales (useXAxisScale/useYAxisScale — the
+// documented recharts v3 pattern for custom overlays: "all charts are able
+// to render arbitrary elements anywhere, Customized is no longer needed").
+// Positions land exactly on the same scale the <Line> uses, and click/hover
+// are plain native SVG event handlers — not recharts' internal per-item
+// event dispatch (Scatter's onClick/onMouseEnter), which turned out not to
+// fire reliably when Scatter was mixed with a Line in the same chart.
+function BookingMarkersLayer({ t, clusters, selected, hovered, setSelected, setHovered }) {
+  const xScale = useXAxisScale()
+  const yScale = useYAxisScale()
+  if (!xScale || !yScale) return null
   return (
-    <g style={{ cursor: 'pointer' }}>
-      <circle cx={cx} cy={cy} r={r} fill={color} fillOpacity={anyActive ? 0.85 : 0.35} stroke={isSelected ? t.text1 : t.card} strokeWidth={isSelected ? 2.5 : 1.5} />
-      {payload.count > 1 && (
-        <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central" fontSize={9} fontWeight={700} fill={t.card}>
-          {payload.count}
-        </text>
-      )}
+    <g>
+      {clusters.map((c) => {
+        const cx = xScale(c.minutes)
+        const cy = yScale(c.rate)
+        if (cx == null || cy == null || Number.isNaN(cx) || Number.isNaN(cy)) return null
+        const anyActive = c.members.some(m => m.status !== 'cancelled')
+        const color = c.count > 1 ? t.blue : (STATUS_META[c.members[0].status]?.color || t.gold)
+        const r = Math.min(11, 5 + (c.count - 1) * 1.5)
+        const isSelected = clusterKey(selected) === clusterKey(c)
+        return (
+          <g key={clusterKey(c)} style={{ cursor: 'pointer' }}
+            onClick={() => setSelected(c)}
+            onMouseEnter={() => setHovered(c)}
+            onMouseLeave={() => setHovered(null)}>
+            {/* Larger invisible hit area — real touch/click target, not just the visible dot */}
+            <circle cx={cx} cy={cy} r={r + 7} fill="transparent" />
+            <circle cx={cx} cy={cy} r={r} fill={color} fillOpacity={anyActive ? 0.85 : 0.35} stroke={isSelected ? t.text1 : t.card} strokeWidth={isSelected ? 2.5 : 1.5} />
+            {c.count > 1 && (
+              <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central" fontSize={9} fontWeight={700} fill={t.card} style={{ pointerEvents: 'none' }}>
+                {c.count}
+              </text>
+            )}
+          </g>
+        )
+      })}
     </g>
   )
 }
@@ -2961,10 +2983,6 @@ function BookingDetailCard({ t, cluster, onClose }) {
   )
 }
 
-// Recharts passes the raw datum to Scatter's onClick/onMouseEnter, but the
-// exact shape (flattened vs. nested under .payload) has varied across
-// versions — handle both so interactivity doesn't silently no-op.
-const clusterOf = (point) => point?.payload ?? point
 const clusterKey = (c) => c ? c.members.map(m => m.id).join(',') : null
 
 function BookingRateChart({ t, card, date, bookings }) {
@@ -3019,6 +3037,19 @@ function BookingRateChart({ t, card, date, bookings }) {
     return clusterBookings(withTime)
   }, [bookings, rateLine, rateField])
 
+  // Explicit Y domain covering BOTH the rate line and the booking markers —
+  // the markers are now positioned via a hook-based overlay (BookingMarkersLayer)
+  // rather than a <Scatter> series bound to the axis, so YAxis has no series
+  // of its own to auto-expand the domain to include booking rates that land
+  // outside the market line's range for the day.
+  const yDomain = useMemo(() => {
+    const vals = [...rateLine.map(r => r.rate), ...clusters.map(c => c.rate)]
+    if (!vals.length) return [0, 1]
+    const min = Math.min(...vals), max = Math.max(...vals)
+    const pad = Math.max(20, (max - min) * 0.12)
+    return [Math.floor(min - pad), Math.ceil(max + pad)]
+  }, [rateLine, clusters])
+
   const loading = rateRows == null
 
   return (
@@ -3053,7 +3084,7 @@ function BookingRateChart({ t, card, date, bookings }) {
               tick={{ fill: t.text4, fontSize: 9 }} axisLine={{ stroke: t.border }} tickLine={false}
             />
             <YAxis
-              type="number" dataKey="rate" domain={['auto', 'auto']}
+              type="number" dataKey="rate" domain={yDomain}
               tick={{ fill: t.text4, fontSize: 9 }} axisLine={false} tickLine={false} width={50}
               tickFormatter={v => `₹${fmtNum(v)}`}
             />
@@ -3061,13 +3092,7 @@ function BookingRateChart({ t, card, date, bookings }) {
               <Line data={rateLine} dataKey="rate" type="monotone" stroke={t.gold} strokeWidth={1.75} dot={false} isAnimationActive={false} />
             )}
             {clusters.length > 0 && (
-              <Scatter
-                data={clusters} dataKey="rate" isAnimationActive={false}
-                shape={(props) => <BookingMarkerDot {...props} t={t} isSelected={clusterKey(selected) === clusterKey(props.payload)} />}
-                onClick={(point) => setSelected(clusterOf(point))}
-                onMouseEnter={(point) => setHovered(clusterOf(point))}
-                onMouseLeave={() => setHovered(null)}
-              />
+              <BookingMarkersLayer t={t} clusters={clusters} selected={selected} hovered={hovered} setSelected={setSelected} setHovered={setHovered} />
             )}
           </ComposedChart>
         </ResponsiveContainer>
