@@ -32,7 +32,7 @@ import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../li
 import { istToday, istDaysAgo, addWorkingDaysSkipSunday, istStartOfDayIso, istEndOfDayIso, fromUtcDate } from '../../lib/dateIst'
 import {
   ResponsiveContainer, ComposedChart, Line, Scatter,
-  XAxis, YAxis, CartesianGrid, Tooltip,
+  XAxis, YAxis, CartesianGrid,
 } from 'recharts'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -2901,42 +2901,24 @@ function clusterBookings(sorted) {
   }))
 }
 
-function BookingMarkerDot({ cx, cy, payload, t, onPick }) {
+// Purely visual — click/hover are wired on <Scatter> itself (see
+// BookingRateChart), not here. A custom recharts `shape` doesn't reliably
+// receive its own pointer events; the parent <Scatter>'s onClick/onMouseEnter
+// props are the documented, reliable way to get per-point interactivity.
+function BookingMarkerDot({ cx, cy, payload, t, isSelected }) {
   if (cx == null || cy == null) return null
   const anyActive = payload.members.some(m => m.status !== 'cancelled')
   const color = payload.count > 1 ? t.blue : (STATUS_META[payload.members[0].status]?.color || t.gold)
   const r = Math.min(11, 5 + (payload.count - 1) * 1.5)
   return (
-    <g style={{ cursor: 'pointer' }} onClick={() => onPick(payload)}>
-      <circle cx={cx} cy={cy} r={r} fill={color} fillOpacity={anyActive ? 0.85 : 0.35} stroke={t.card} strokeWidth={1.5} />
+    <g style={{ cursor: 'pointer' }}>
+      <circle cx={cx} cy={cy} r={r} fill={color} fillOpacity={anyActive ? 0.85 : 0.35} stroke={isSelected ? t.text1 : t.card} strokeWidth={isSelected ? 2.5 : 1.5} />
       {payload.count > 1 && (
         <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central" fontSize={9} fontWeight={700} fill={t.card}>
           {payload.count}
         </text>
       )}
     </g>
-  )
-}
-
-// Floating hover tip — quick glance only; click opens the full detail card
-// (handles clusters, which need more room than a tooltip comfortably gives).
-function BookingMarkerTip({ active, payload, t }) {
-  if (!active || !payload?.length) return null
-  const cluster = payload.find(p => p.payload?.members)?.payload
-  if (!cluster) return null
-  if (cluster.count > 1) {
-    return (
-      <div style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: 8, padding: '6px 10px', fontSize: 11, color: t.text2 }}>
-        {cluster.count} bookings around {fmtDayMinutes(cluster.minutes)} — click to view
-      </div>
-    )
-  }
-  const b = cluster.members[0]
-  return (
-    <div style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: 8, padding: '8px 12px', fontSize: 11, color: t.text2 }}>
-      <div style={{ color: t.gold, fontWeight: 700, marginBottom: 2 }}>{fmtDayMinutes(b.minutes)} · {b.party || 'Booking'}</div>
-      <div>{fmt(b.weight)}g @ ₹{fmtNum(b.rate)}/g — click for full detail</div>
-    </div>
   )
 }
 
@@ -2979,9 +2961,16 @@ function BookingDetailCard({ t, cluster, onClose }) {
   )
 }
 
+// Recharts passes the raw datum to Scatter's onClick/onMouseEnter, but the
+// exact shape (flattened vs. nested under .payload) has varied across
+// versions — handle both so interactivity doesn't silently no-op.
+const clusterOf = (point) => point?.payload ?? point
+const clusterKey = (c) => c ? c.members.map(m => m.id).join(',') : null
+
 function BookingRateChart({ t, card, date, bookings }) {
   const [rateRows, setRateRows] = useState(null)   // null = loading
   const [selected, setSelected] = useState(null)   // clicked cluster
+  const [hovered,  setHovered]  = useState(null)   // hovered cluster
 
   useEffect(() => {
     let cancelled = false
@@ -3011,9 +3000,14 @@ function BookingRateChart({ t, card, date, bookings }) {
 
   const rateLine = useMemo(() => {
     if (!rateRows?.length) return []
+    // gold_rates.*_sell_rate is quoted per 10 grams (standard bullion-market
+    // convention — see the `sell > 100000` sanity floor in
+    // app/api/fetch-gold-rates/route.js), while cal_quotas.rate (the booking
+    // rate) is per gram. Convert to per-gram so the line and the booking
+    // markers share one scale instead of the line dwarfing every marker.
     return rateRows
       .filter(r => r[rateField.key] != null)
-      .map(r => ({ minutes: toDayMinutes(r.fetched_at), rate: r[rateField.key] }))
+      .map(r => ({ minutes: toDayMinutes(r.fetched_at), rate: r[rateField.key] / 10 }))
   }, [rateRows, rateField])
 
   const clusters = useMemo(() => {
@@ -3033,8 +3027,14 @@ function BookingRateChart({ t, card, date, bookings }) {
         <div style={{ fontSize: 12, color: t.text3, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 700 }}>
           Intraday Gold Rate — Bookings Overlay
         </div>
-        <div style={{ fontSize: 10.5, color: t.text4 }}>
-          {rateLine.length > 0 ? `${rateField.label} sell rate · click a marker for full detail` : 'Market rate data unavailable for this day'}
+        <div style={{ fontSize: 10.5, color: hovered ? t.gold : t.text4, fontWeight: hovered ? 600 : 400 }}>
+          {hovered
+            ? (hovered.count > 1
+                ? `${hovered.count} bookings around ${fmtDayMinutes(hovered.minutes)} — click to view`
+                : `${fmtDayMinutes(hovered.minutes)} · ${hovered.members[0].party || 'Booking'} · ${fmt(hovered.members[0].weight)}g @ ₹${fmtNum(hovered.members[0].rate)}/g — click for full detail`)
+            : rateLine.length > 0
+              ? `${rateField.label} sell rate, ₹/g · click a marker for full detail`
+              : 'Market rate data unavailable for this day'}
         </div>
       </div>
 
@@ -3057,12 +3057,17 @@ function BookingRateChart({ t, card, date, bookings }) {
               tick={{ fill: t.text4, fontSize: 9 }} axisLine={false} tickLine={false} width={50}
               tickFormatter={v => `₹${fmtNum(v)}`}
             />
-            <Tooltip content={(props) => <BookingMarkerTip {...props} t={t} />} />
             {rateLine.length > 1 && (
               <Line data={rateLine} dataKey="rate" type="monotone" stroke={t.gold} strokeWidth={1.75} dot={false} isAnimationActive={false} />
             )}
             {clusters.length > 0 && (
-              <Scatter data={clusters} dataKey="rate" shape={(props) => <BookingMarkerDot {...props} t={t} onPick={setSelected} />} isAnimationActive={false} />
+              <Scatter
+                data={clusters} dataKey="rate" isAnimationActive={false}
+                shape={(props) => <BookingMarkerDot {...props} t={t} isSelected={clusterKey(selected) === clusterKey(props.payload)} />}
+                onClick={(point) => setSelected(clusterOf(point))}
+                onMouseEnter={(point) => setHovered(clusterOf(point))}
+                onMouseLeave={() => setHovered(null)}
+              />
             )}
           </ComposedChart>
         </ResponsiveContainer>
