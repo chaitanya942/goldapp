@@ -1207,8 +1207,12 @@ export default function DashboardHome() {
     setPrevKpis(prevJson?.kpis || null)
     if (!silent) setLoading(false)
 
-    // State/branch breakdowns from the same Supabase aggregate.
-    const branchRows = data.branches || []
+    // State/branch breakdowns from the same Supabase aggregate. The API
+    // returns this field as `branchData` (see app/api/report-aggregates —
+    // it renames the RPC's own `branches` key), not `branches` — reading
+    // the wrong key here silently zeroed out "By Region" and "Top/Bottom
+    // Branches" while the KPI cards (a separate field) stayed correct.
+    const branchRows = data.branchData || []
     const groupByState = filterType === 'region' || filterType === 'state'
     const groupKey = groupByState ? 'state' : 'region'
     const groupMap = {}
