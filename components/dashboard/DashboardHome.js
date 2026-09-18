@@ -820,8 +820,11 @@ export default function DashboardHome() {
   // (e.g. "All Time", or the window came back empty).
   const [prevKpis,      setPrevKpis]      = useState(null)
   const [stateData,     setStateData]     = useState([])
+  // Full sorted lists (not pre-sliced) so the rank-count selector below can
+  // change how many rows are shown without a re-fetch.
   const [topBranches,    setTopBranches]    = useState([])
   const [bottomBranches, setBottomBranches] = useState([])
+  const [rankCount,      setRankCount]      = useState(5)   // Top/Bottom N selector — 5/10/15/20
   const [branchMeta,    setBranchMeta]    = useState([])
   const [regionCounts,  setRegionCounts]  = useState({})
   const [stateCount,    setStateCount]    = useState(0)
@@ -1217,10 +1220,12 @@ export default function DashboardHome() {
       groupMap[key].branch_count++
     })
     setStateData(Object.values(groupMap).sort((a, b) => b.total_net - a.total_net))
+    // Store the full sorted lists — the Top/Bottom N selector slices at
+    // render time so switching 5/10/15/20 doesn't need a re-fetch.
     const sortedDesc = [...branchRows].sort((a, b) => Number(b.total_net || 0) - Number(a.total_net || 0))
-    setTopBranches(sortedDesc.slice(0, 5))
+    setTopBranches(sortedDesc)
     const activeAsc = sortedDesc.filter(b => Number(b.txn_count || 0) > 0).reverse()
-    setBottomBranches(activeAsc.slice(0, 5))
+    setBottomBranches(activeAsc)
   }
 
   const name          = userProfile?.full_name?.split(' ')[0] || 'there'
@@ -1732,17 +1737,35 @@ export default function DashboardHome() {
             </div>}
 
             {/* Bottom panel — Top/Bottom Branches (By Region moved above). */}
-            {showTopBranches && (
+            {showTopBranches && (() => {
+              const shownTop    = topBranches.slice(0, rankCount)
+              const shownBottom = bottomBranches.slice(0, rankCount)
+              const barMax      = Math.max(...shownTop.map(x=>Number(x.total_net||0)), 1)
+              return (
               <div style={panel}>
-                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-                  <div style={panelTitle}>Top 5 Branches</div>
-                  <div style={panelMeta}>Net Weight</div>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8 }}>
+                  <div style={panelTitle}>Top {rankCount} Branches</div>
+                  <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                    {/* Top/Bottom N selector — applies to both lists below. */}
+                    <div style={{ display:'flex', gap:3, padding:3, background:t.card, borderRadius:8, border:`1px solid ${t.border}` }}>
+                      {[5,10,15,20].map(n => (
+                        <button key={n} onClick={()=>setRankCount(n)}
+                          style={{ padding:'3px 9px', borderRadius:5, border:'none', cursor:'pointer',
+                            background: rankCount===n ? `${t.gold}` : 'transparent',
+                            color: rankCount===n ? '#0a0a0a' : t.text3,
+                            fontSize:11, fontWeight: rankCount===n ? 700 : 500 }}>
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={panelMeta}>Net Weight</div>
+                  </div>
                 </div>
                 {loading
-                  ? [0,1,2,3,4].map(i=><div key={i} style={{ height:26, background:`linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize:'200% 100%', borderRadius:4, marginBottom:6, animation:'shimmer 1.5s infinite' }}/>)
+                  ? Array.from({length: Math.min(rankCount, 10)}).map((_,i)=><div key={i} style={{ height:26, background:`linear-gradient(90deg,${t.border},${t.border2},${t.border})`, backgroundSize:'200% 100%', borderRadius:4, marginBottom:6, animation:'shimmer 1.5s infinite' }}/>)
                   : !hasData
                     ? <EmptyPanel t={t} />
-                    : topBranches.map((b,i)=>{
+                    : shownTop.map((b,i)=>{
                         const region = branchRegionMap[b.branch_name]
                         const color  = regionColorMap[region] || t.green
                         return (
@@ -1751,29 +1774,30 @@ export default function DashboardHome() {
                             value={`${fmt(b.total_net)}g`}
                             color={color} t={t}
                             bar={Number(b.total_net||0)}
-                            barMax={Math.max(...topBranches.map(x=>Number(x.total_net||0)),1)}/>
+                            barMax={barMax}/>
                         )
                       })
                 }
-                {/* Bottom 5 — separator + list */}
-                {!loading && hasData && bottomBranches.length > 0 && (
+                {/* Bottom N — separator + list */}
+                {!loading && hasData && shownBottom.length > 0 && (
                   <>
                     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', margin:'22px 0 14px', paddingTop:14, borderTop:`1px solid ${t.border}` }}>
-                      <div style={{ ...panelTitle, color:t.red }}>Bottom 5 Branches</div>
+                      <div style={{ ...panelTitle, color:t.red }}>Bottom {rankCount} Branches</div>
                       <div style={panelMeta}>active only</div>
                     </div>
-                    {bottomBranches.map((b,i)=>(
+                    {shownBottom.map((b,i)=>(
                       <StatRow key={b.branch_name} delay={i*50}
                         label={b.branch_name}
                         value={`${fmt(b.total_net)}g`}
                         color={t.red} t={t}
                         bar={Number(b.total_net||0)}
-                        barMax={Math.max(...topBranches.map(x=>Number(x.total_net||0)),1)}/>
+                        barMax={barMax}/>
                     ))}
                   </>
                 )}
               </div>
-            )}
+              )
+            })()}
           </div>
         </div>
       </div>}
