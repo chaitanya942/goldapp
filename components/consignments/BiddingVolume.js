@@ -24,11 +24,16 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp } from '../../lib/context'
+import { supabase } from '../../lib/supabase'
 import GoldSpinner from '../ui/GoldSpinner'
 import AnimatedNumber from '../ui/AnimatedNumber'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
-import { istToday, istDaysAgo, addWorkingDaysSkipSunday } from '../../lib/dateIst'
+import { istToday, istDaysAgo, addWorkingDaysSkipSunday, istStartOfDayIso, istEndOfDayIso, fromUtcDate } from '../../lib/dateIst'
+import {
+  ResponsiveContainer, ComposedChart, Line, Scatter,
+  XAxis, YAxis, CartesianGrid, Tooltip,
+} from 'recharts'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 // A bill that was internally transferred (branch → hub) groups under the branch it
@@ -2344,6 +2349,11 @@ export default function BiddingVolume() {
       {/* ────────────────────────── BOOKINGS TAB ────────────────────────── */}
       {activeTab === 'bookings' && (
         <>
+          <BookingRateChart
+            t={t} card={card}
+            date={bookingsDate}
+            bookings={tabBookings}
+          />
           <BookingsList
             t={t} card={card}
             bookings={tabBookings}
@@ -2827,6 +2837,240 @@ const partyColor = (name) => {
   const k = String(name || '').trim().toLowerCase()
   if (!_bookingPartyCache[k]) _bookingPartyCache[k] = _bookingPartyColors[_bookingPartyIdx++ % _bookingPartyColors.length]
   return _bookingPartyCache[k]
+}
+
+// ── Intraday gold-rate chart (Bookings tab) ─────────────────────────────────
+// Plots the day's gold market-rate movement (from gold_rates, the same table
+// components/sales/LiveMarketRates.js polls every minute) with each booking
+// overlaid as a marker at its exact booking time/rate, so ops can see at a
+// glance whether a booking landed above/below the market line. Bookings made
+// within a few minutes of each other are merged into a single clickable
+// cluster marker so the chart stays readable.
+
+// Which gold_rates column to treat as "the" market reference line — same
+// priority/color convention as LiveMarketRates.js (kalinga = gold = primary).
+const RATE_FIELDS = [
+  { key: 'kalinga_sell_rate', label: 'Kalinga' },
+  { key: 'ambica_sell_rate',  label: 'Ambica'  },
+  { key: 'aamlin_sell_rate',  label: 'Aamlin'  },
+]
+
+// Minutes since IST midnight for a timestamptz — matches the row's own IST
+// calendar day since callers pre-filter to that day's bounds.
+function toDayMinutes(iso) {
+  const d = fromUtcDate(new Date(iso))
+  return d.getUTCHours() * 60 + d.getUTCMinutes() + d.getUTCSeconds() / 60
+}
+
+function fmtDayMinutes(m) {
+  const h = Math.floor(m / 60) % 24
+  const mm = Math.round(m % 60)
+  const ampm = h < 12 ? 'AM' : 'PM'
+  const h12 = h % 12 === 0 ? 12 : h % 12
+  return mm === 0 ? `${h12} ${ampm}` : `${h12}:${String(mm).padStart(2, '0')} ${ampm}`
+}
+
+// Nearest-by-time lookup — "gold market/reference rate at that time" for a
+// booking that didn't happen to land exactly on a gold_rates fetch tick.
+function nearestRate(series, minutes) {
+  if (!series.length) return null
+  let best = series[0], bestDiff = Math.abs(series[0].minutes - minutes)
+  for (const r of series) {
+    const diff = Math.abs(r.minutes - minutes)
+    if (diff < bestDiff) { best = r; bestDiff = diff }
+  }
+  return best.rate
+}
+
+// Chain-cluster bookings placed within CLUSTER_MINUTES of the previous one in
+// the same cluster, so a burst of back-to-back bookings collapses into one
+// marker with a count badge instead of an unreadable pile of overlapping dots.
+const CLUSTER_MINUTES = 10
+function clusterBookings(sorted) {
+  const groups = []
+  for (const b of sorted) {
+    const g = groups[groups.length - 1]
+    if (g && (b.minutes - g[g.length - 1].minutes) <= CLUSTER_MINUTES) g.push(b)
+    else groups.push([b])
+  }
+  return groups.map(members => ({
+    minutes:  members.reduce((s, m) => s + m.minutes, 0) / members.length,
+    rate:     members.reduce((s, m) => s + m.rate, 0) / members.length,
+    count:    members.length,
+    members,
+  }))
+}
+
+function BookingMarkerDot({ cx, cy, payload, t, onPick }) {
+  if (cx == null || cy == null) return null
+  const anyActive = payload.members.some(m => m.status !== 'cancelled')
+  const color = payload.count > 1 ? t.blue : (STATUS_META[payload.members[0].status]?.color || t.gold)
+  const r = Math.min(11, 5 + (payload.count - 1) * 1.5)
+  return (
+    <g style={{ cursor: 'pointer' }} onClick={() => onPick(payload)}>
+      <circle cx={cx} cy={cy} r={r} fill={color} fillOpacity={anyActive ? 0.85 : 0.35} stroke={t.card} strokeWidth={1.5} />
+      {payload.count > 1 && (
+        <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central" fontSize={9} fontWeight={700} fill={t.card}>
+          {payload.count}
+        </text>
+      )}
+    </g>
+  )
+}
+
+// Floating hover tip — quick glance only; click opens the full detail card
+// (handles clusters, which need more room than a tooltip comfortably gives).
+function BookingMarkerTip({ active, payload, t }) {
+  if (!active || !payload?.length) return null
+  const cluster = payload.find(p => p.payload?.members)?.payload
+  if (!cluster) return null
+  if (cluster.count > 1) {
+    return (
+      <div style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: 8, padding: '6px 10px', fontSize: 11, color: t.text2 }}>
+        {cluster.count} bookings around {fmtDayMinutes(cluster.minutes)} — click to view
+      </div>
+    )
+  }
+  const b = cluster.members[0]
+  return (
+    <div style={{ background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: 8, padding: '8px 12px', fontSize: 11, color: t.text2 }}>
+      <div style={{ color: t.gold, fontWeight: 700, marginBottom: 2 }}>{fmtDayMinutes(b.minutes)} · {b.party || 'Booking'}</div>
+      <div>{fmt(b.weight)}g @ ₹{fmtNum(b.rate)}/g — click for full detail</div>
+    </div>
+  )
+}
+
+// Full detail card for the clicked marker/cluster — one row per booking, with
+// every field the spec calls for (time, weight, rate, market reference rate
+// at that time, value, and a reference since cal_quotas has no dedicated
+// booking-number column — falls back to bidder name + a short id fragment).
+function BookingDetailCard({ t, cluster, onClose }) {
+  if (!cluster) return null
+  return (
+    <div style={{ marginTop: 10, background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: 10, padding: '12px 14px', maxHeight: 260, overflowY: 'auto' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ fontSize: 11, color: t.text3, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 700 }}>
+          {cluster.count > 1 ? `${cluster.count} bookings near ${fmtDayMinutes(cluster.minutes)}` : `Booking at ${fmtDayMinutes(cluster.minutes)}`}
+        </div>
+        <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: t.text4, cursor: 'pointer', fontSize: 14 }}>✕</button>
+      </div>
+      {cluster.members.map(b => (
+        <div key={b.id} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 16px', padding: '8px 0', borderTop: `1px solid ${t.border}` }}>
+          <div style={{ fontSize: 10.5, color: t.text4 }}>Booking time</div>
+          <div style={{ fontSize: 10.5, color: t.text4 }}>Booking weight</div>
+          <div style={{ fontSize: 12, color: t.text1 }}>{fmtTS(b.created_at)}</div>
+          <div style={{ fontSize: 12, color: t.text1 }}>{fmt(b.weight)} g</div>
+          <div style={{ fontSize: 10.5, color: t.text4, marginTop: 5 }}>Booking rate</div>
+          <div style={{ fontSize: 10.5, color: t.text4, marginTop: 5 }}>{b.refRateLabel || 'Market'} rate at that time</div>
+          <div style={{ fontSize: 12, color: t.gold, fontWeight: 600 }}>₹{fmtNum(b.rate)}/g</div>
+          <div style={{ fontSize: 12, color: t.text2 }}>{b.refRate != null ? `₹${fmtNum(b.refRate)}/g` : '—'}</div>
+          <div style={{ fontSize: 10.5, color: t.text4, marginTop: 5 }}>Booking value</div>
+          <div style={{ fontSize: 10.5, color: t.text4, marginTop: 5 }}>Reference</div>
+          <div style={{ fontSize: 12, color: t.text1 }}>{fmtINR(b.weight * b.rate)}</div>
+          <div style={{ fontSize: 12, color: t.text2 }}>{b.party || '—'} · #{String(b.id).slice(0, 8)}</div>
+          <div style={{ gridColumn: '1 / -1', marginTop: 3 }}>
+            <span style={{ fontSize: 9.5, color: STATUS_META[b.status]?.color || t.text3, textTransform: 'uppercase', letterSpacing: '.06em' }}>
+              {STATUS_META[b.status]?.label || b.status}
+            </span>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function BookingRateChart({ t, card, date, bookings }) {
+  const [rateRows, setRateRows] = useState(null)   // null = loading
+  const [selected, setSelected] = useState(null)   // clicked cluster
+
+  useEffect(() => {
+    let cancelled = false
+    setSelected(null)
+    setRateRows(null)
+    supabase
+      .from('gold_rates')
+      .select('fetched_at, kalinga_sell_rate, ambica_sell_rate, aamlin_sell_rate')
+      .gte('fetched_at', istStartOfDayIso(date))
+      .lte('fetched_at', istEndOfDayIso(date))
+      .order('fetched_at', { ascending: true })
+      .then(({ data }) => { if (!cancelled) setRateRows(data || []) })
+    return () => { cancelled = true }
+  }, [date])
+
+  // Pick whichever source has the most coverage that day so the line still
+  // renders if the primary feed (Kalinga) happened to have a gap.
+  const rateField = useMemo(() => {
+    if (!rateRows?.length) return RATE_FIELDS[0]
+    let best = RATE_FIELDS[0], bestCount = -1
+    for (const f of RATE_FIELDS) {
+      const n = rateRows.filter(r => r[f.key] != null).length
+      if (n > bestCount) { best = f; bestCount = n }
+    }
+    return best
+  }, [rateRows])
+
+  const rateLine = useMemo(() => {
+    if (!rateRows?.length) return []
+    return rateRows
+      .filter(r => r[rateField.key] != null)
+      .map(r => ({ minutes: toDayMinutes(r.fetched_at), rate: r[rateField.key] }))
+  }, [rateRows, rateField])
+
+  const clusters = useMemo(() => {
+    const withTime = (bookings || [])
+      .filter(b => b.created_at)
+      .map(b => ({ ...b, minutes: toDayMinutes(b.created_at) }))
+      .sort((a, b) => a.minutes - b.minutes)
+      .map(b => ({ ...b, refRate: nearestRate(rateLine, b.minutes), refRateLabel: rateField.label }))
+    return clusterBookings(withTime)
+  }, [bookings, rateLine, rateField])
+
+  const loading = rateRows == null
+
+  return (
+    <div style={{ ...card, padding: '16px 18px', marginBottom: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
+        <div style={{ fontSize: 12, color: t.text3, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 700 }}>
+          Intraday Gold Rate — Bookings Overlay
+        </div>
+        <div style={{ fontSize: 10.5, color: t.text4 }}>
+          {rateLine.length > 0 ? `${rateField.label} sell rate · click a marker for full detail` : 'Market rate data unavailable for this day'}
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>Loading rate history…</div>
+      ) : clusters.length === 0 && rateLine.length === 0 ? (
+        <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>No bookings or market data for this day</div>
+      ) : (
+        <ResponsiveContainer width="100%" height={220}>
+          <ComposedChart margin={{ top: 10, right: 16, bottom: 10, left: 4 }}>
+            <CartesianGrid stroke={t.border} strokeOpacity={0.4} vertical={false} />
+            <XAxis
+              type="number" dataKey="minutes" domain={[0, 1440]}
+              ticks={[0, 120, 240, 360, 480, 600, 720, 840, 960, 1080, 1200, 1320, 1440]}
+              tickFormatter={fmtDayMinutes}
+              tick={{ fill: t.text4, fontSize: 9 }} axisLine={{ stroke: t.border }} tickLine={false}
+            />
+            <YAxis
+              type="number" dataKey="rate" domain={['auto', 'auto']}
+              tick={{ fill: t.text4, fontSize: 9 }} axisLine={false} tickLine={false} width={50}
+              tickFormatter={v => `₹${fmtNum(v)}`}
+            />
+            <Tooltip content={(props) => <BookingMarkerTip {...props} t={t} />} />
+            {rateLine.length > 1 && (
+              <Line data={rateLine} dataKey="rate" type="monotone" stroke={t.gold} strokeWidth={1.75} dot={false} isAnimationActive={false} />
+            )}
+            {clusters.length > 0 && (
+              <Scatter data={clusters} dataKey="rate" shape={(props) => <BookingMarkerDot {...props} t={t} onPick={setSelected} />} isAnimationActive={false} />
+            )}
+          </ComposedChart>
+        </ResponsiveContainer>
+      )}
+
+      {selected && <BookingDetailCard t={t} cluster={selected} onClose={() => setSelected(null)} />}
+    </div>
+  )
 }
 
 // Dispatch-state visual map. Keyed by the per-booking flag the API computes
