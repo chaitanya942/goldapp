@@ -10,6 +10,7 @@ import { triggerSync } from '../../lib/triggerSync'
 
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { istNow, istStr, fromUtcDate, istToday, istDaysAgo, istLastWeekRange } from '../../lib/dateIst'
+import { useDashboardAuditLog } from '../../lib/useDashboardAuditLog'
 import LiveFeedFlashcards from './LiveFeedFlashcards'
 import MonthProjection from './MonthProjection'
 import TodaysBookingsWidget from './TodaysBookingsWidget'
@@ -860,6 +861,18 @@ export default function DashboardHome() {
   useEffect(() => {
     if (filterType !== 'branch') { setBranchSearch(''); setBranchDropOpen(false) }
   }, [filterType])
+
+  // Audit trail: log who viewed the dashboard, under what region/branch/period.
+  // See sql/dashboard_audit_log.sql + lib/useDashboardAuditLog.js.
+  const auditOpenSections = [overviewOpen && 'Purchase Overview', consignOpen && 'Consignment Overview', salesOpen && 'Sales Overview'].filter(Boolean)
+  useDashboardAuditLog({
+    page: 'dashboard',
+    section: auditOpenSections.length ? auditOpenSections.join(', ') : 'Overview',
+    region: (filterType && filterType !== 'branch') ? filterValue : null,
+    branch: filterType === 'branch' ? filterValue : null,
+    period: PERIODS.find(p => p.key === period)?.label || period,
+    filters: filterType ? { filterType } : null,
+  })
 
   // Trigger a CRM→Supabase sync every 10s (via shared in-flight-guarded
   // helper so multiple surfaces don't pile up overlapping syncs) and poll

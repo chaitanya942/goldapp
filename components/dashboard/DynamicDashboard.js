@@ -12,6 +12,7 @@ import {
 
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { istNow, istStr, istDaysAgo as daysBack } from '../../lib/dateIst'
+import { useDashboardAuditLog } from '../../lib/useDashboardAuditLog'
 import ConsignmentOverviewWidget from './ConsignmentOverviewWidget'
 import TodaysBookingsWidget from './TodaysBookingsWidget'
 import LiveFeedFlashcards from './LiveFeedFlashcards'
@@ -207,6 +208,18 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   const [branchDropOpen,  setBranchDropOpen]  = useState(false)
   const [lastRefresh,     setLastRefresh]     = useState(null)
   const [lastSyncAt,      setLastSyncAt]      = useState(null)
+
+  // Audit trail: log who viewed the Purchase Overview, under what region/branch/period.
+  // PurchaseInline only mounts while its CollapsibleSection is expanded, so this
+  // naturally fires on open and stops when collapsed. See sql/dashboard_audit_log.sql.
+  useDashboardAuditLog({
+    page: 'dynamic-dashboard',
+    section: 'Purchase Overview',
+    region: (filterType && filterType !== 'branch') ? filterValue : null,
+    branch: filterType === 'branch' ? filterValue : null,
+    period: PERIODS.find(p => p.key === period)?.label || period,
+    filters: filterType ? { filterType } : null,
+  })
   const branchInputRef = useRef(null)
   const branchDropRef  = useRef(null)
   const refreshRef     = useRef(null)

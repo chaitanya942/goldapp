@@ -14,6 +14,7 @@
 import { useEffect, useState } from 'react'
 import { authedFetch } from '../../lib/authedFetch'
 import { istToday, istDaysAgo, istLastWeekRange } from '../../lib/dateIst'
+import { useDashboardAuditLog } from '../../lib/useDashboardAuditLog'
 
 const REGION_COLORS_DASH = {
   'Andhra Pradesh':    '#5ec1d6',
@@ -112,6 +113,24 @@ export default function ConsignmentOverviewWidget({ t, isMobile, setActiveNav })
   const [dateMode,   setDateMode]   = useState('today')
   const [customFrom, setCustomFrom] = useState('')
   const [customTo,   setCustomTo]   = useState('')
+
+  // Audit trail: log who viewed the Consignment Overview, under what region/period.
+  // This widget only mounts while its CollapsibleSection is expanded. Declared
+  // before the loading early-return below so the hook always runs (Rules of
+  // Hooks). See sql/dashboard_audit_log.sql + lib/useDashboardAuditLog.js.
+  const auditPeriodLabel =
+    dateMode === 'today'     ? 'Today' :
+    dateMode === 'yesterday' ? 'Yesterday' :
+    dateMode === 'last_week' ? 'Last Week' :
+    dateMode === 'custom'    ? `${customFrom || '?'} to ${customTo || customFrom || '?'}` :
+    'All'
+  useDashboardAuditLog({
+    page: 'dynamic-dashboard',
+    section: 'Consignment Overview',
+    region: filterRegion !== 'all' ? filterRegion : null,
+    branch: null,
+    period: auditPeriodLabel,
+  })
 
   if (stockRows == null || transitRows == null) {
     return (
