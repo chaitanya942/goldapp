@@ -717,6 +717,10 @@ function OldCrmTab({
   const billedPct         = totalWalkins > 0 ? Math.round((totalBilled / totalWalkins) * 100) : 0
   const approvedPctBilled = totalBilled  > 0 ? Math.round((approved   / totalBilled)  * 100) : 0
   const conversionPct     = totalWalkins > 0 ? Math.round((approved   / totalWalkins) * 100) : 0
+  // Weight conversion — purchased gold weight ÷ walked-in gold weight. Shown
+  // alongside the bill-count conversion above so a branch that bills fewer
+  // customers but lands heavier bills (or vice versa) is visible either way.
+  const weightConversionPct = goldWalkedIn > 0 ? Math.round((goldPurchased / goldWalkedIn) * 100) : 0
   const physicalApproved  = goldPipeline?.physical?.approved || 0
   const releaseApproved   = goldPipeline?.released?.approved || 0
 
@@ -784,7 +788,7 @@ function OldCrmTab({
           </div>
           <div style={{ display:'flex', justifyContent:'space-between', marginTop:5, padding:'0 2px' }}>
             <span style={{ fontSize:'.5rem', color:t.blue, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase' }}>Walk-in → Billed: {billedPct}%</span>
-            <span style={{ fontSize:'.5rem', color:t.green, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase' }}>Overall conversion: {conversionPct}%</span>
+            <span style={{ fontSize:'.5rem', color:t.green, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase' }}>Bill conversion: {conversionPct}% · Weight conversion: {weightConversionPct}%</span>
           </div>
         </div>
 
@@ -923,9 +927,10 @@ function OldCrmTab({
         {/* ── Stats ribbon ── */}
         <div style={{ display:'flex', gap:0, marginTop:10, background:t.card, border:`1px solid ${t.border}`, borderRadius:14, overflow:'hidden', flexWrap:'wrap', boxShadow:`0 2px 8px rgba(0,0,0,.08)` }}>
           {[
-            { label:'Walk → Bill',          value:`${billedPct}%`,         color:t.gold,   key: null },
-            { label:'Bill → Purchase',      value:`${approvedPctBilled}%`, color:t.green,  key: null },
-            { label:'Walk-in → Purchase',   value:`${conversionPct}%`,     color:t.blue,   key: null },
+            { label:'Walk → Bill',              value:`${billedPct}%`,           color:t.gold,   key: null },
+            { label:'Bill → Purchase',          value:`${approvedPctBilled}%`,   color:t.green,  key: null },
+            { label:'Bill Conversion',          value:`${conversionPct}%`,       color:t.blue,   key: null },
+            { label:'Weight Conversion',        value:`${weightConversionPct}%`, color:t.purple, key: null },
             ...(crmNotUpdatedCnt > 0? [{ label:'CRM not updated', value:crmNotUpdatedCnt, color:t.red,    key:'crm_not_updated' }] : []),
           ].map((s, i) => {
             const isActive = activeMetric === s.key
@@ -1661,6 +1666,7 @@ function RegionTable({ t, regions, allTxns, allWalkins, allKycRows }) {
   const safeTxns    = allTxns    || []
   const safeWalkins = allWalkins || []
   const safeKyc     = allKycRows || []
+  const validWt = (w) => { const x = Number(w.gms_weight) || 0; return (x < 10000 || x !== Math.floor(x)) ? x : 0 }
   const rows = (regions || []).map(r => {
     const rTx  = safeTxns.filter(tx => tx.region === r)
     const rWk  = safeWalkins.filter(w => w.region === r)
@@ -1668,29 +1674,32 @@ function RegionTable({ t, regions, allTxns, allWalkins, allKycRows }) {
     const rPend= rTx.filter(tx => tx.trxn_status === 'pending')
     const rKyc = safeKyc.filter(k => k.region === r)
     const value = rApp.reduce((s, tx) => s + (Number(tx.amount) || 0), 0)
-    const conv  = rWk.length > 0 ? Math.round(rApp.length / rWk.length * 100) : 0
-    return { region: r, walkins: rWk.length, billed: rTx.length, purchased: rApp.length, pending: rPend.length, kyc: rKyc.length, value, conv }
+    const walkinWt    = rWk.reduce((s, w) => s + validWt(w), 0)
+    const purchasedWt = rApp.reduce((s, tx) => s + csvSum(tx.grms_wet_csv), 0)
+    const conv   = rWk.length > 0 ? Math.round(rApp.length / rWk.length * 100) : 0
+    const wtConv = walkinWt > 0 ? Math.round(purchasedWt / walkinWt * 100) : 0
+    return { region: r, walkins: rWk.length, billed: rTx.length, purchased: rApp.length, pending: rPend.length, kyc: rKyc.length, value, walkinWt, purchasedWt, conv, wtConv }
   }).sort((a, b) => b.purchased - a.purchased)
 
-  const cols = ['Region', 'Walk-ins', 'Billed', 'Purchased', 'Pending', 'KYC Blocked', 'Value', 'Conversion']
+  const cols = ['Region', 'Walk-ins', 'Billed', 'Purchased', 'Pending', 'KYC Blocked', 'Value', 'Bill Conv', 'Wt Conv']
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <SectionLabel t={t}>Region Breakdown</SectionLabel>
-        <button onClick={() => downloadCSV('regions.csv', cols, rows, r => [r.region, r.walkins, r.billed, r.purchased, r.pending, r.kyc, r.value, `${r.conv}%`])}
+        <button onClick={() => downloadCSV('regions.csv', cols, rows, r => [r.region, r.walkins, r.billed, r.purchased, r.pending, r.kyc, r.value, `${r.conv}%`, `${r.wtConv}%`])}
           style={{ padding: '4px 12px', borderRadius: 6, fontSize: '.58rem', cursor: 'pointer', border: `1px solid ${t.border}`, background: t.card, color: t.text3, marginBottom: 12 }}>
           ↓ CSV
         </button>
       </div>
       <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
-          <div style={{ minWidth: 820 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '140px 80px 80px 90px 80px 90px 110px 90px', gap: 8, padding: '8px 16px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
+          <div style={{ minWidth: 940 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '140px 80px 80px 90px 80px 90px 110px 90px 90px', gap: 8, padding: '8px 16px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
               {cols.map(h => <span key={h} style={{ fontSize: '.56rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase' }}>{h}</span>)}
             </div>
             {rows.map((r, i) => (
               <div key={r.region} style={{
-                display: 'grid', gridTemplateColumns: '140px 80px 80px 90px 80px 90px 110px 90px',
+                display: 'grid', gridTemplateColumns: '140px 80px 80px 90px 80px 90px 110px 90px 90px',
                 gap: 8, padding: '11px 16px', borderBottom: i < rows.length - 1 ? `1px solid ${t.border}18` : 'none', alignItems: 'center',
               }}
                 onMouseEnter={e => e.currentTarget.style.background = t.card2}
@@ -1702,11 +1711,17 @@ function RegionTable({ t, regions, allTxns, allWalkins, allKycRows }) {
                 <span style={{ fontSize: '.68rem', color: t.orange, fontFamily: 'ui-monospace,monospace' }}>{r.pending}</span>
                 <span style={{ fontSize: '.68rem', color: t.purple, fontFamily: 'ui-monospace,monospace' }}>{r.kyc || '—'}</span>
                 <span style={{ fontSize: '.68rem', color: t.gold,   fontFamily: 'ui-monospace,monospace' }}>{r.value > 0 ? fmtAmt(r.value) : '—'}</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} title={`${r.purchased} / ${r.walkins} walk-ins`}>
                   <div style={{ flex: 1, height: 4, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
                     <div style={{ height: '100%', width: `${r.conv}%`, background: r.conv >= 50 ? t.green : r.conv >= 30 ? t.orange : t.red, borderRadius: 2 }} />
                   </div>
                   <span style={{ fontSize: '.6rem', color: t.text3, fontFamily: 'ui-monospace,monospace', whiteSpace: 'nowrap' }}>{r.conv}%</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} title={`${fmtWt(r.purchasedWt)} / ${fmtWt(r.walkinWt)}`}>
+                  <div style={{ flex: 1, height: 4, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${r.wtConv}%`, background: r.wtConv >= 50 ? t.green : r.wtConv >= 30 ? t.orange : t.red, borderRadius: 2 }} />
+                  </div>
+                  <span style={{ fontSize: '.6rem', color: t.text3, fontFamily: 'ui-monospace,monospace', whiteSpace: 'nowrap' }}>{r.wtConv}%</span>
                 </div>
               </div>
             ))}
@@ -1938,6 +1953,9 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
   const totalWalkinsWt = totalWt + reWalkinWt, totalWalkinsGr = totalGr + reWalkinGr
 
   const conversionPct       = total > 0 ? Math.round(completed / total * 100) : 0
+  // Weight conversion — completed (net) weight ÷ total (net) weight, mirroring
+  // the count-based conversionPct's numerator/denominator pairing above.
+  const weightConversionPct = totalWt > 0 ? Math.round(completedWt / totalWt * 100) : 0
   const walkoutRate         = total > 0 ? Math.round(walkout / total * 100) : 0
   const progressedPct       = total > 0 ? Math.round((inProgress + completed) / total * 100) : 0
   const completedOfProgPct  = (inProgress + completed) > 0 ? Math.round(completed / (inProgress + completed) * 100) : 0
@@ -1982,16 +2000,19 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
     const takeover = regionTxns.filter(tx => tx.transaction_type === 'RELEASED_GOLD').length
     // Per-region performance — all regions (for comparison), independent of the region filter.
     const regionRows = (regions || []).map(rg => {
-      const inR  = newCrmTxns.filter(tx => tx.region === rg)
-      const comp = (completedToday || []).filter(r => r.region === rg).length
-      const pend = inR.filter(tx => IN_PROGRESS_STATUSES.includes(tx.status) || tx.status === 'WALKIN').length
-      const walk = inR.length + comp
-      return { region: rg, walkins: walk, completed: comp, pending: pend, conversion: walk ? Math.round(comp / walk * 100) : 0 }
+      const inR    = newCrmTxns.filter(tx => tx.region === rg)
+      const compRows = (completedToday || []).filter(r => r.region === rg)
+      const comp   = compRows.length
+      const pend   = inR.filter(tx => IN_PROGRESS_STATUSES.includes(tx.status) || tx.status === 'WALKIN').length
+      const walk   = inR.length + comp
+      const walkWt = inR.reduce((s, tx) => s + (Number(tx.net_weight) || 0), 0) + compRows.reduce((s, tx) => s + (Number(tx.net_weight) || 0), 0)
+      const compWt = compRows.reduce((s, tx) => s + (Number(tx.net_weight) || 0), 0)
+      return { region: rg, walkins: walk, completed: comp, pending: pend, conversion: walk ? Math.round(comp / walk * 100) : 0, wtConversion: walkWt ? Math.round(compWt / walkWt * 100) : 0 }
     }).filter(r => r.walkins > 0)
     return (
       <LiveFeedVisuals t={t}
         stages={vStages}
-        totals={{ totalWalkins, completed, pendingCount, conversionPct, walkoutRate }}
+        totals={{ totalWalkins, completed, pendingCount, conversionPct, weightConversionPct, walkoutRate }}
         typeSplit={{ physical, takeover }}
         regionRows={regionRows}
         txns={txns} allTxns={newCrmTxns} stageOf={stageOfStatus}
@@ -2140,7 +2161,8 @@ function NewCrmTab({ t, newCrmTxns, completedToday, newCrmError, regionFilter, r
         {/* ── Stats ribbon ── */}
         <div style={{ display:'flex', gap:0, marginTop:10, background:t.card, border:`1px solid ${t.border}`, borderRadius:14, overflow:'hidden', flexWrap:'wrap', boxShadow:`0 2px 8px rgba(0,0,0,.08)` }}>
           {[
-            { label:'Total → Completed', value:`${conversionPct}%`,    color:t.green,  key: null },
+            { label:'Bill Conversion',   value:`${conversionPct}%`,       color:t.green,  key: null },
+            { label:'Weight Conversion', value:`${weightConversionPct}%`, color:t.purple, key: null },
             { label:'In Pipeline',       value:fmtNum(inProgress),      color:t.orange, key:'inprogress' },
             { label:'Walkout Rate',      value:`${walkoutRate}%`,        color:walkoutRate >= 40 ? t.red : t.text3, key: walkout > 0 ? 'walkout' : null },
             ...(kycTxns.length > 0 ? [{ label:'KYC Pending', value:kycTxns.length, color:t.purple, key:'kyc' }] : []),
@@ -2513,28 +2535,31 @@ function NewCrmRegionTable({ t, regions, allTxns }) {
     const rProg = rTx.filter(tx => IN_PROGRESS_STATUSES.includes(tx.status))
     const rWout = rTx.filter(tx => tx.status === 'WALKOUT')
     const value = rComp.reduce((s, tx) => s + (Number(tx.amount) || 0), 0)
-    const conv  = rTx.length > 0 ? Math.round(rComp.length / rTx.length * 100) : 0
-    return { region: r, total: rTx.length, inProgress: rProg.length, completed: rComp.length, walkout: rWout.length, value, conv }
+    const totalWt = rTx.reduce((s, tx) => s + (Number(tx.net_weight) || 0), 0)
+    const compWt  = rComp.reduce((s, tx) => s + (Number(tx.net_weight) || 0), 0)
+    const conv    = rTx.length > 0 ? Math.round(rComp.length / rTx.length * 100) : 0
+    const wtConv  = totalWt > 0 ? Math.round(compWt / totalWt * 100) : 0
+    return { region: r, total: rTx.length, inProgress: rProg.length, completed: rComp.length, walkout: rWout.length, value, totalWt, compWt, conv, wtConv }
   }).sort((a, b) => b.completed - a.completed)
 
-  const cols = ['Region', 'Total', 'In Progress', 'Completed', 'Walkout', 'Value', 'Conversion']
+  const cols = ['Region', 'Total', 'In Progress', 'Completed', 'Walkout', 'Value', 'Bill Conv', 'Wt Conv']
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
         <SectionLabel t={t}>Region Breakdown</SectionLabel>
-        <button onClick={() => downloadCSV('new-crm-regions.csv', cols, rows, r => [r.region, r.total, r.inProgress, r.completed, r.walkout, r.value, `${r.conv}%`])}
+        <button onClick={() => downloadCSV('new-crm-regions.csv', cols, rows, r => [r.region, r.total, r.inProgress, r.completed, r.walkout, r.value, `${r.conv}%`, `${r.wtConv}%`])}
           style={{ padding: '4px 12px', borderRadius: 6, fontSize: '.58rem', cursor: 'pointer', border: `1px solid ${t.border}`, background: t.card, color: t.text3, marginBottom: 12 }}>
           ↓ CSV
         </button>
       </div>
       <Card t={t} style={{ padding: 0, overflow: 'hidden' }}>
         <div style={{ overflowX: 'auto' }}>
-          <div style={{ minWidth: 760 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '140px 70px 100px 90px 80px 110px 90px', gap: 8, padding: '8px 16px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
+          <div style={{ minWidth: 860 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '140px 70px 100px 90px 80px 110px 90px 90px', gap: 8, padding: '8px 16px', background: t.card2, borderBottom: `1px solid ${t.border}` }}>
               {cols.map(h => <span key={h} style={{ fontSize: '.56rem', color: t.text3, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase' }}>{h}</span>)}
             </div>
             {rows.map((r, i) => (
-              <div key={r.region} style={{ display: 'grid', gridTemplateColumns: '140px 70px 100px 90px 80px 110px 90px', gap: 8, padding: '11px 16px', borderBottom: i < rows.length - 1 ? `1px solid ${t.border}18` : 'none', alignItems: 'center' }}
+              <div key={r.region} style={{ display: 'grid', gridTemplateColumns: '140px 70px 100px 90px 80px 110px 90px 90px', gap: 8, padding: '11px 16px', borderBottom: i < rows.length - 1 ? `1px solid ${t.border}18` : 'none', alignItems: 'center' }}
                 onMouseEnter={e => e.currentTarget.style.background = t.card2}
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                 <span style={{ fontSize: '.75rem', color: t.text1, fontWeight: 600, whiteSpace: 'nowrap' }}>{r.region}</span>
@@ -2543,11 +2568,17 @@ function NewCrmRegionTable({ t, regions, allTxns }) {
                 <span style={{ fontSize: '.68rem', color: t.green,  fontFamily: 'ui-monospace,monospace', fontWeight: 600 }}>{r.completed}</span>
                 <span style={{ fontSize: '.68rem', color: t.red,    fontFamily: 'ui-monospace,monospace' }}>{r.walkout || '—'}</span>
                 <span style={{ fontSize: '.68rem', color: t.gold,   fontFamily: 'ui-monospace,monospace' }}>{r.value > 0 ? fmtAmt(r.value) : '—'}</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} title={`${r.completed} / ${r.total}`}>
                   <div style={{ flex: 1, height: 4, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
                     <div style={{ height: '100%', width: `${r.conv}%`, background: r.conv >= 50 ? t.green : r.conv >= 30 ? t.orange : t.red, borderRadius: 2 }} />
                   </div>
                   <span style={{ fontSize: '.6rem', color: t.text3, fontFamily: 'ui-monospace,monospace', whiteSpace: 'nowrap' }}>{r.conv}%</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} title={`${fmtWt(r.compWt)}g / ${fmtWt(r.totalWt)}g`}>
+                  <div style={{ flex: 1, height: 4, borderRadius: 2, background: t.border, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${r.wtConv}%`, background: r.wtConv >= 50 ? t.green : r.wtConv >= 30 ? t.orange : t.red, borderRadius: 2 }} />
+                  </div>
+                  <span style={{ fontSize: '.6rem', color: t.text3, fontFamily: 'ui-monospace,monospace', whiteSpace: 'nowrap' }}>{r.wtConv}%</span>
                 </div>
               </div>
             ))}

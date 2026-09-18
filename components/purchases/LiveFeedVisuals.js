@@ -169,14 +169,15 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
   const bMap = new Map()
   for (const tx of (txns || [])) {
     const b = tx.branch_name || '—'
-    const row = bMap.get(b) || { branch: b, walkins: 0, completed: 0, wt: 0 }
+    const row = bMap.get(b) || { branch: b, walkins: 0, completed: 0, wt: 0, completedWt: 0 }
     row.walkins++
-    if (stageOf && stageOf(tx.status) === 'completed') row.completed++
-    row.wt += Number(tx.net_weight) || 0
+    const wt = Number(tx.net_weight) || 0
+    row.wt += wt
+    if (stageOf && stageOf(tx.status) === 'completed') { row.completed++; row.completedWt += wt }
     bMap.set(b, row)
   }
   const branches = [...bMap.values()]
-    .map(r => ({ ...r, conversion: r.walkins ? Math.round(r.completed / r.walkins * 100) : 0 }))
+    .map(r => ({ ...r, conversion: r.walkins ? Math.round(r.completed / r.walkins * 100) : 0, wtConversion: r.wt ? Math.round(r.completedWt / r.wt * 100) : 0 }))
     .sort((a, b) => b.walkins - a.walkins).slice(0, 8)
 
   // ── Value & throughput (money + gold actually bought today) ───────────────
@@ -327,12 +328,13 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
       {/* KPI hero strip */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(178px, 1fr))', gap: 12, marginBottom: 14 }}>
         <Kpi t={t} icon="👣" accent={t.blue}   label="Walk-ins"     value={fmtNum(totals.totalWalkins)} sub={dateLabel} />
-        <Kpi t={t} icon="✅" accent={t.green}  label="Completed"    value={fmtNum(totals.completed)}    sub={`${totals.conversionPct}% conversion`} />
+        <Kpi t={t} icon="✅" accent={t.green}  label="Bill Conversion"   value={`${totals.conversionPct}%`}       sub={`${fmtNum(totals.completed)} of ${fmtNum(totals.totalWalkins)}`} />
+        <Kpi t={t} icon="⚖️" accent={t.purple} label="Weight Conversion" value={`${totals.weightConversionPct || 0}%`} sub="purchased ÷ walk-in gold weight" />
         <Kpi t={t} icon="⏳" accent={t.orange} label="In pipeline"  value={fmtNum(totals.pendingCount)} sub="not yet purchased" />
         <Kpi t={t} icon="🚪" accent={t.red}    label="Walkout rate" value={`${totals.walkoutRate || 0}%`} sub="left without buying" />
         <Kpi t={t} icon="💰" accent={t.green}  label="Value bought" value={fmtINR(completedValue)}      sub="completed deals" />
         <Kpi t={t} icon="🧾" accent={t.purple} label="Avg ticket"   value={fmtINR(avgTicket)}           sub={`${fmtWt(avgWt)}g avg net wt`} />
-        <Kpi t={t} icon="⚖️" accent={t.gold}   label="Gold bought"  value={fmtKg(completedNetWt)}       sub={yieldPct ? `${yieldPct}% net of gross` : 'net weight'} />
+        <Kpi t={t} icon="🥇" accent={t.gold}   label="Gold bought"  value={fmtKg(completedNetWt)}       sub={yieldPct ? `${yieldPct}% net of gross` : 'net weight'} />
         <Kpi t={t} icon="🪙" accent={t.orange} label="Gold pending" value={fmtKg(pendingWt)}            sub="still in journey" />
       </div>
 
@@ -359,22 +361,29 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
       )}
 
       <div style={{ display: 'grid', ...grid }}>
-        {/* 1. Conversion gauge */}
-        <Panel t={t} title="Conversion" icon="🎯" accent={t.green} hint="Walk-ins that completed a purchase today">
-          <div style={{ position: 'relative', height: 200 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <RadialBarChart innerRadius="72%" outerRadius="100%" barSize={16}
-                data={[{ name: 'Conversion', value: totals.conversionPct, fill: t.green }]}
-                startAngle={90} endAngle={90 - (360 * totals.conversionPct / 100)}>
-                <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
-                <RadialBar background={{ fill: `${t.green}18` }} dataKey="value" cornerRadius={12} angleAxisId={0} fill={vFill(t.green)} isAnimationActive={false} />
-              </RadialBarChart>
-            </ResponsiveContainer>
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
-              <span style={{ fontSize: '2.4rem', fontWeight: 800, color: t.green, lineHeight: 1, textShadow: `0 0 22px ${t.green}33` }}>{totals.conversionPct}%</span>
-              <span style={{ fontSize: '.62rem', color: t.text3, marginTop: 6 }}>{fmtNum(totals.completed)} of {fmtNum(totals.totalWalkins)}</span>
-              <span style={{ fontSize: '.58rem', color: t.text4, marginTop: 5 }}>{fmtNum(totals.pendingCount)} still in pipeline</span>
-            </div>
+        {/* 1. Conversion gauges — bill count and gold weight, side by side */}
+        <Panel t={t} title="Conversion" icon="🎯" accent={t.green} hint="Walk-ins that completed a purchase today — by bill count and by gold weight">
+          <div style={{ display: 'flex', height: 200 }}>
+            {[
+              { key: 'bill',   label: 'Bill Conversion',   pct: totals.conversionPct,             color: t.green,  sub: `${fmtNum(totals.completed)} of ${fmtNum(totals.totalWalkins)}` },
+              { key: 'weight', label: 'Weight Conversion', pct: totals.weightConversionPct || 0,   color: t.purple, sub: 'gold weight purchased ÷ walked in' },
+            ].map(g => (
+              <div key={g.key} style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <RadialBarChart innerRadius="72%" outerRadius="100%" barSize={14}
+                    data={[{ name: g.label, value: g.pct, fill: g.color }]}
+                    startAngle={90} endAngle={90 - (360 * g.pct / 100)}>
+                    <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
+                    <RadialBar background={{ fill: `${g.color}18` }} dataKey="value" cornerRadius={10} angleAxisId={0} fill={vFill(g.color)} isAnimationActive={false} />
+                  </RadialBarChart>
+                </ResponsiveContainer>
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', padding: '0 8px' }}>
+                  <span style={{ fontSize: '1.8rem', fontWeight: 800, color: g.color, lineHeight: 1, textShadow: `0 0 22px ${g.color}33` }}>{g.pct}%</span>
+                  <span style={{ fontSize: '.56rem', color: t.text3, marginTop: 6, textAlign: 'center' }}>{g.sub}</span>
+                  <span style={{ fontSize: '.54rem', color: t.text4, marginTop: 4, textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700 }}>{g.label}</span>
+                </div>
+              </div>
+            ))}
           </div>
         </Panel>
 
@@ -482,23 +491,30 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
           ) : <Empty t={t} />}
         </Panel>
 
-        {/* 8. Region conversion ranking (vs overall benchmark) */}
-        <Panel t={t} title="Conversion ranking" icon="🏅" accent={t.gold} hint={`Best → worst by conversion. Dashed line = overall ${totals.conversionPct}%`}>
+        {/* 8. Region conversion ranking (vs overall benchmark) — bill count and gold weight */}
+        <Panel t={t} title="Conversion ranking" icon="🏅" accent={t.gold} hint={`Bill vs weight conversion by region. Dashed lines = overall bill ${totals.conversionPct}% / weight ${totals.weightConversionPct || 0}%`}>
           {rankRegions.length ? (
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={rankRegions} layout="vertical" margin={{ left: 8, right: 34, top: 4, bottom: 4 }}>
-                <XAxis type="number" domain={[0, 100]} tick={axis} axisLine={false} tickLine={false} />
-                <YAxis type="category" dataKey="region" tick={axis} axisLine={false} tickLine={false} width={92} />
-                <Tooltip cursor={{ fill: `${t.text3}10` }} content={(p) => <ChartTip t={t} unit="pct" {...p} />} />
-                <ReferenceLine x={totals.conversionPct} stroke={t.text3} strokeDasharray="4 4" />
-                <Bar dataKey="conversion" name="Conversion" radius={[0, 7, 7, 0]} isAnimationActive={false}>
-                  {rankRegions.map((d, i) => (
-                    <Cell key={i} fill={hFill(d.conversion >= totals.conversionPct ? t.green : t.orange)} />
-                  ))}
-                  <LabelList dataKey="conversion" position="right" formatter={(v) => `${v}%`} style={{ fill: t.text2, fontSize: 10, fontWeight: 800 }} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={rankRegions} layout="vertical" margin={{ left: 8, right: 34, top: 4, bottom: 4 }} barGap={2}>
+                  <XAxis type="number" domain={[0, 100]} tick={axis} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="region" tick={axis} axisLine={false} tickLine={false} width={92} />
+                  <Tooltip cursor={{ fill: `${t.text3}10` }} content={(p) => <ChartTip t={t} unit="pct" {...p} />} />
+                  <ReferenceLine x={totals.conversionPct} stroke={t.green} strokeDasharray="4 4" />
+                  <ReferenceLine x={totals.weightConversionPct || 0} stroke={t.purple} strokeDasharray="4 4" />
+                  <Bar dataKey="conversion" name="Bill conv." fill={hFill(t.green)} radius={[0, 7, 7, 0]} isAnimationActive={false}>
+                    <LabelList dataKey="conversion" position="right" formatter={(v) => `${v}%`} style={{ fill: t.text2, fontSize: 10, fontWeight: 800 }} />
+                  </Bar>
+                  <Bar dataKey="wtConversion" name="Weight conv." fill={hFill(t.purple)} radius={[0, 7, 7, 0]} isAnimationActive={false}>
+                    <LabelList dataKey="wtConversion" position="right" formatter={(v) => `${v}%`} style={{ fill: t.text2, fontSize: 10, fontWeight: 800 }} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+              <div style={{ display: 'flex', gap: 14, justifyContent: 'center', fontSize: '.6rem', color: t.text4, marginTop: 4 }}>
+                <span><span style={{ display: 'inline-block', width: 8, height: 8, background: t.green, borderRadius: 2, marginRight: 4 }} />bill conv.</span>
+                <span><span style={{ display: 'inline-block', width: 8, height: 8, background: t.purple, borderRadius: 2, marginRight: 4 }} />weight conv.</span>
+              </div>
+            </>
           ) : <Empty t={t} />}
         </Panel>
 
@@ -553,7 +569,7 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
         </Panel>
 
         {/* 12. Branch leaderboard */}
-        <Panel t={t} title="Top branches" icon="🏆" accent={t.gold} hint="Walk-ins today, with conversion — spot the leaders & laggards" span={2}>
+        <Panel t={t} title="Top branches" icon="🏆" accent={t.gold} hint="Walk-ins today, with bill and weight conversion — spot the leaders & laggards" span={2}>
           {branches.length ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4 }}>
               {branches.map((b, i) => {
@@ -567,7 +583,8 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
                       <div style={{ position: 'absolute', left: 0, top: 0, width: `${Math.round(b.completed / max * 100)}%`, height: '100%', background: `linear-gradient(90deg, ${t.green}99, ${t.green})`, borderRadius: 5 }} />
                     </div>
                     <span style={{ width: 30, textAlign: 'right', color: t.text1, fontWeight: 800 }}>{b.walkins}</span>
-                    <span style={{ width: 44, textAlign: 'right', color: b.conversion >= 40 ? t.green : b.conversion >= 20 ? t.gold : t.text3, fontWeight: 800 }}>{b.conversion}%</span>
+                    <span style={{ width: 44, textAlign: 'right', color: b.conversion >= 40 ? t.green : b.conversion >= 20 ? t.gold : t.text3, fontWeight: 800 }} title="Bill conversion">{b.conversion}%</span>
+                    <span style={{ width: 44, textAlign: 'right', color: b.wtConversion >= 40 ? t.purple : t.text3, fontWeight: 800 }} title="Weight conversion">{b.wtConversion}%</span>
                     <span style={{ width: 58, textAlign: 'right', color: t.text3 }}>{fmtKg(b.wt)}</span>
                   </div>
                 )
@@ -575,7 +592,7 @@ export default function LiveFeedVisuals({ t, stages, totals, typeSplit, regionRo
               <div style={{ display: 'flex', gap: 14, marginTop: 8, justifyContent: 'flex-end', fontSize: '.6rem', color: t.text4 }}>
                 <span><span style={{ display: 'inline-block', width: 8, height: 8, background: t.blue, borderRadius: 2, marginRight: 4 }} />walk-ins</span>
                 <span><span style={{ display: 'inline-block', width: 8, height: 8, background: t.green, borderRadius: 2, marginRight: 4 }} />completed</span>
-                <span>conv%</span><span>net wt</span>
+                <span>bill conv%</span><span>wt conv%</span><span>net wt</span>
               </div>
             </div>
           ) : <Empty t={t} />}

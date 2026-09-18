@@ -52,6 +52,10 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
   const purchasedCount = data?.summary?.approved                          || 0
   const purchasedWt    = parseFloat(data?.goldPipeline?.purchased_wt)     || 0
   const conversionPct  = freshWalkins > 0 ? Math.round((purchasedCount / freshWalkins) * 100) : 0
+  // Weight conversion — purchased gold weight ÷ walked-in gold weight. A
+  // second lens alongside the bill-count conversion above: a branch can bill
+  // fewer customers but land more grams (or vice versa), so both matter.
+  const weightConversionPct = walkinWt > 0 ? Math.round((purchasedWt / walkinWt) * 100) : 0
 
   const minsAgo = lastUpdated ? Math.floor((Date.now() - lastUpdated.getTime()) / 60000) : null
   const liveLabel = !lastUpdated ? 'loading…' : minsAgo === 0 ? 'just now' : `${minsAgo}m ago`
@@ -88,11 +92,12 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
         )}
       </div>
 
-      {/* 3-column flashcard grid — comfortably fits 360px+. On very narrow
-          viewports (<340px) it'll wrap naturally via the auto-fit min. */}
+      {/* 4-column flashcard grid — comfortably fits 360px+ (2x2 on mobile).
+          Bill conversion (count-based) and Weight conversion (gram-based)
+          sit side by side since a branch can lead on one and lag the other. */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: isMobile ? 'repeat(3, minmax(0, 1fr))' : 'repeat(3, minmax(160px, 1fr))',
+        gridTemplateColumns: isMobile ? 'repeat(2, minmax(0, 1fr))' : 'repeat(4, minmax(140px, 1fr))',
         gap: isMobile ? 8 : 10,
       }}>
         <FlashCard
@@ -115,13 +120,23 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
         />
         <FlashCard
           t={t} accent={conversionPct >= 50 ? t.green : conversionPct >= 25 ? t.gold : t.orange || t.red}
-          label="Conversion"
+          label="Bill Conversion"
           value={conversionPct}
           unit="%"
           sub={freshWalkins > 0 ? `${purchasedCount} / ${freshWalkins} fresh` : 'awaiting walk-ins'}
           loading={loading && !data}
           isMobile={isMobile}
           progress={Math.min(100, conversionPct)}
+        />
+        <FlashCard
+          t={t} accent={weightConversionPct >= 50 ? t.green : weightConversionPct >= 25 ? t.gold : t.orange || t.red}
+          label="Weight Conversion"
+          value={weightConversionPct}
+          unit="%"
+          sub={walkinWt > 0 ? `${fmtWt(purchasedWt)} / ${fmtWt(walkinWt)}` : 'awaiting weight'}
+          loading={loading && !data}
+          isMobile={isMobile}
+          progress={Math.min(100, weightConversionPct)}
         />
       </div>
 
