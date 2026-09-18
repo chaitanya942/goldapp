@@ -47,6 +47,29 @@ const PERIODS = [
 ]
 const COLOR_PALETTE = ['#c9a84c','#3aaa6a','#3a8fbf','#8c5ac8','#c9981f','#e05555']
 
+// The comparison period floats with whatever range is selected: N days
+// selected → the immediately preceding N days (inclusive on both ends, no
+// gap and no overlap). E.g. 10–16 Sep (7 days) → 3–9 Sep. 18 Aug–16 Sep
+// (30 days) → 19 Jul–17 Aug. A single day (16 Sep) → 15 Sep. Undefined for
+// "All Time" (no fixed-length window to mirror).
+function getPrevRange(from, to) {
+  if (!from || !to) return { from: null, to: null }
+  const f = new Date(`${from}T00:00:00Z`)
+  const l = new Date(`${to}T00:00:00Z`)
+  const days = Math.round((l - f) / 86400000) + 1
+  const prevTo = new Date(f); prevTo.setUTCDate(prevTo.getUTCDate() - 1)
+  const prevFrom = new Date(prevTo); prevFrom.setUTCDate(prevFrom.getUTCDate() - (days - 1))
+  const iso = (d) => d.toISOString().slice(0, 10)
+  return { from: iso(prevFrom), to: iso(prevTo) }
+}
+
+// % change of curr vs prev — null when there's nothing meaningful to compare.
+function pctChange(curr, prev) {
+  const c = Number(curr) || 0, p = Number(prev) || 0
+  if (p === 0) return c === 0 ? null : 100
+  return ((c - p) / p) * 100
+}
+
 // ── Shared shimmer ────────────────────────────────────────────────────────────
 const Shimmer = ({ h=24, w='60%', t }) => (
   <div style={{ height:h, width:w, background:`linear-gradient(90deg,${t.border2},${t.border},${t.border2})`, backgroundSize:'200% 100%', borderRadius:6, animation:'shimmer 1.5s infinite', opacity:.9 }} />
@@ -65,7 +88,7 @@ function useMobile() {
 }
 
 // ── KPI card (purchase overview style) ───────────────────────────────────────
-function KpiCard({ label, value, sub, color, icon, loading, t, delay=0, compact=false }) {
+function KpiCard({ label, value, sub, prevValue, deltaPct, color, icon, loading, t, delay=0, compact=false }) {
   const [vis, setVis] = useState(false)
   useEffect(() => { const id = setTimeout(()=>setVis(true),delay); return ()=>clearTimeout(id) }, [delay])
   return (
@@ -81,6 +104,19 @@ function KpiCard({ label, value, sub, color, icon, loading, t, delay=0, compact=
         : <div style={{ fontSize: compact ? 22 : 28, fontWeight:200, color, letterSpacing:'-.02em', lineHeight:1, fontVariantNumeric:'tabular-nums' }}>{value ?? '—'}</div>
       }
       {sub && !loading && <div style={{ fontSize: compact ? 10 : 12, color:t.text4, marginTop: compact ? 5 : 8, lineHeight:1.4 }}>{sub}</div>}
+      {/* Previous-period comparison — same filters, immediately preceding
+          window of equal length (see getPrevRange). Omitted when there's
+          nothing to compare against. */}
+      {!loading && prevValue != null && (
+        <div style={{ display:'flex', alignItems:'center', gap:7, marginTop: sub ? 6 : 8, flexWrap:'wrap' }}>
+          <span style={{ fontSize: compact ? 10 : 11, color:t.text4 }}>Prev: <b style={{ color:t.text3, fontWeight:600 }}>{prevValue}</b></span>
+          {deltaPct != null && (
+            <span style={{ fontSize: compact ? 10 : 11, fontWeight:700, color: deltaPct >= 0 ? t.green : t.red }}>
+              {deltaPct >= 0 ? '▲' : '▼'} {Math.abs(deltaPct).toFixed(1)}%
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -132,6 +168,9 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   const [loading,      setLoading]      = useState(true)
   const [trendLoading, setTrendLoading] = useState(true)
   const [kpis,         setKpis]         = useState(null)
+  // KPIs for the comparison window (see getPrevRange) — same filters, the
+  // immediately preceding period of equal length.
+  const [prevKpis,     setPrevKpis]     = useState(null)
   const [todayKpis,    setTodayKpis]    = useState(null)
   const [stateData,    setStateData]    = useState([])
   const [topBranches,    setTopBranches]    = useState([])
@@ -252,6 +291,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   const fetchPeriod = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true)
     const { from, to } = getRange(period)
+    const { from: prevFrom, to: prevTo } = getPrevRange(from, to)
 
     let p_branch = null
     let p_region_branches = null
@@ -268,15 +308,29 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
     // Single source of truth: Supabase. The earlier CRM-live override
     // returned a wrong NET weight (~30% short) and the regression hit
     // stakeholders. Trust the sync — 10s drift is the accepted tolerance.
-    const { data } = await supabase.rpc('get_purchase_aggregates', {
-      p_from_date: from, p_to_date: to,
-      p_branch, p_txn_type: null,
-      p_region_branches: p_region_branches || null,
-      p_single_day: from === to,
-    })
-    if (!data) { if (!silent) setLoading(false); return }
+    // The comparison-period fetch (same filters, the immediately preceding
+    // window of equal length — see getPrevRange) rides alongside it so every
+    // KPI card can show current vs previous.
+    const [{ data }, prevRes] = await Promise.all([
+      supabase.rpc('get_purchase_aggregates', {
+        p_from_date: from, p_to_date: to,
+        p_branch, p_txn_type: null,
+        p_region_branches: p_region_branches || null,
+        p_single_day: from === to,
+      }),
+      prevFrom
+        ? supabase.rpc('get_purchase_aggregates', {
+            p_from_date: prevFrom, p_to_date: prevTo,
+            p_branch, p_txn_type: null,
+            p_region_branches: p_region_branches || null,
+            p_single_day: prevFrom === prevTo,
+          })
+        : Promise.resolve({ data: null }),
+    ])
+    if (!data) { if (!silent) { setLoading(false); setPrevKpis(null) }; return }
 
     setKpis(data.kpis || null)
+    setPrevKpis(prevRes?.data?.kpis || null)
     if (!silent) setLoading(false)
 
     const branchRows = data.branches || []
@@ -324,6 +378,7 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   const totalBranches = Object.values(regionCounts).reduce((a,b)=>a+b,0)
   const maxStateNet   = Math.max(...stateData.map(s=>Number(s.total_net||0)),1)
   const hasData       = kpis?.total_count > 0
+  const hasPrevData   = hasData && prevKpis?.total_count > 0
   const hasStateData  = stateData.filter(s=>s.state&&Number(s.total_net||0)>0).length > 0
   const physPct       = hasData ? (kpis.physical_count/kpis.total_count)*100 : 0
   const takePct       = hasData ? (kpis.takeover_count/kpis.total_count)*100 : 0
@@ -470,16 +525,32 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
             </div>
           )}
           <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: isMobile ? 10 : 14 }}>
-            <KpiCard t={t} delay={0}   label="Total Bills"          icon="🧾" color={t.gold}   loading={loading} compact={isMobile} value={hasData?Number(kpis.total_count).toLocaleString('en-IN'):'—'} sub={periodLabel}/>
-            <KpiCard t={t} delay={60}  label="Total Net Weight"     icon="⚖️" color={t.gold}   loading={loading} compact={isMobile} value={hasData?`${fmt(kpis.total_net)}g`:'—'} sub="Net weight purchased"/>
-            <KpiCard t={t} delay={120} label="Gross Purchase Value" icon="₹"  color={t.green}  loading={loading} compact={isMobile} value={hasData?fmtCr(kpis.total_value):'—'} sub="Before service charges"/>
-            <KpiCard t={t} delay={180} label="Avg Rate / Gram"      icon="📈" color={t.green}  loading={loading} compact={isMobile} value={hasData&&kpis.avg_rate_per_gram>0?`₹${Number(kpis.avg_rate_per_gram).toLocaleString('en-IN',{maximumFractionDigits:0})}/g`:'—'} sub="Gross value ÷ net weight"/>
+            <KpiCard t={t} delay={0}   label="Total Bills"          icon="🧾" color={t.gold}   loading={loading} compact={isMobile} value={hasData?Number(kpis.total_count).toLocaleString('en-IN'):'—'} sub={periodLabel}
+              prevValue={hasPrevData ? Number(prevKpis.total_count).toLocaleString('en-IN') : null}
+              deltaPct={hasPrevData ? pctChange(kpis?.total_count, prevKpis.total_count) : null}/>
+            <KpiCard t={t} delay={60}  label="Total Net Weight"     icon="⚖️" color={t.gold}   loading={loading} compact={isMobile} value={hasData?`${fmt(kpis.total_net)}g`:'—'} sub="Net weight purchased"
+              prevValue={hasPrevData ? `${fmt(prevKpis.total_net)}g` : null}
+              deltaPct={hasPrevData ? pctChange(kpis?.total_net, prevKpis.total_net) : null}/>
+            <KpiCard t={t} delay={120} label="Gross Purchase Value" icon="₹"  color={t.green}  loading={loading} compact={isMobile} value={hasData?fmtCr(kpis.total_value):'—'} sub="Before service charges"
+              prevValue={hasPrevData ? fmtCr(prevKpis.total_value) : null}
+              deltaPct={hasPrevData ? pctChange(kpis?.total_value, prevKpis.total_value) : null}/>
+            <KpiCard t={t} delay={180} label="Avg Rate / Gram"      icon="📈" color={t.green}  loading={loading} compact={isMobile} value={hasData&&kpis.avg_rate_per_gram>0?`₹${Number(kpis.avg_rate_per_gram).toLocaleString('en-IN',{maximumFractionDigits:0})}/g`:'—'} sub="Gross value ÷ net weight"
+              prevValue={hasPrevData && prevKpis.avg_rate_per_gram>0 ? `₹${Number(prevKpis.avg_rate_per_gram).toLocaleString('en-IN',{maximumFractionDigits:0})}/g` : null}
+              deltaPct={hasPrevData ? pctChange(kpis?.avg_rate_per_gram, prevKpis.avg_rate_per_gram) : null}/>
           </div>
           <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: isMobile ? 10 : 14 }}>
-            <KpiCard t={t} delay={240} label="Avg Purity"         icon="✦"  color={t.purple} loading={loading} compact={isMobile} value={hasData?fmtPct(kpis.avg_purity):'—'} sub="Weighted by net weight"/>
-            <KpiCard t={t} delay={300} label="Avg Wt / Bill"      icon="◈"  color={t.text2}  loading={loading} compact={isMobile} value={hasData?`${fmt(kpis.avg_net_per_txn)}g`:'—'} sub="Net weight ÷ bills"/>
-            <KpiCard t={t} delay={360} label="Avg Service Charge" icon="%"  color={t.red}    loading={loading} compact={isMobile} value={hasData?`${Number(kpis.avg_service_charge_pct||0).toFixed(2)}%`:'—'} sub="Service charge ÷ gross value"/>
-            <KpiCard t={t} delay={420} label="Active Branches"    icon="⬡"  color={t.blue}   loading={loading} compact={isMobile} value={hasData?`${kpis.branch_count} / ${totalBranches}`:`— / ${totalBranches}`} sub={hasData?'branches purchased':'No purchases this period'}/>
+            <KpiCard t={t} delay={240} label="Avg Purity"         icon="✦"  color={t.purple} loading={loading} compact={isMobile} value={hasData?fmtPct(kpis.avg_purity):'—'} sub="Weighted by net weight"
+              prevValue={hasPrevData ? fmtPct(prevKpis.avg_purity) : null}
+              deltaPct={hasPrevData ? pctChange(kpis?.avg_purity, prevKpis.avg_purity) : null}/>
+            <KpiCard t={t} delay={300} label="Avg Wt / Bill"      icon="◈"  color={t.text2}  loading={loading} compact={isMobile} value={hasData?`${fmt(kpis.avg_net_per_txn)}g`:'—'} sub="Net weight ÷ bills"
+              prevValue={hasPrevData ? `${fmt(prevKpis.avg_net_per_txn)}g` : null}
+              deltaPct={hasPrevData ? pctChange(kpis?.avg_net_per_txn, prevKpis.avg_net_per_txn) : null}/>
+            <KpiCard t={t} delay={360} label="Avg Service Charge" icon="%"  color={t.red}    loading={loading} compact={isMobile} value={hasData?`${Number(kpis.avg_service_charge_pct||0).toFixed(2)}%`:'—'} sub="Service charge ÷ gross value"
+              prevValue={hasPrevData ? `${Number(prevKpis.avg_service_charge_pct||0).toFixed(2)}%` : null}
+              deltaPct={hasPrevData ? pctChange(kpis?.avg_service_charge_pct, prevKpis.avg_service_charge_pct) : null}/>
+            <KpiCard t={t} delay={420} label="Active Branches"    icon="⬡"  color={t.blue}   loading={loading} compact={isMobile} value={hasData?`${kpis.branch_count} / ${totalBranches}`:`— / ${totalBranches}`} sub={hasData?'branches purchased':'No purchases this period'}
+              prevValue={hasPrevData ? `${prevKpis.branch_count} / ${totalBranches}` : null}
+              deltaPct={hasPrevData ? pctChange(kpis?.branch_count, prevKpis.branch_count) : null}/>
           </div>
         </>
       )}

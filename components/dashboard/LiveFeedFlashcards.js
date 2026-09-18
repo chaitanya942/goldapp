@@ -10,12 +10,21 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { authedFetch } from '../../lib/authedFetch'
-import { istToday } from '../../lib/dateIst'
+import { istToday, istDaysAgo } from '../../lib/dateIst'
 
 const REFRESH_SECS = 10
 
+// % change of curr vs prev — null when there's nothing meaningful to compare
+// (both zero), so the badge can be omitted instead of showing a stray "0%".
+const pctDelta = (curr, prev) => {
+  if (prev > 0) return Math.round((curr - prev) / prev * 100)
+  if (curr > 0) return 100
+  return null
+}
+
 export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
   const [data,        setData]        = useState(null)
+  const [yData,        setYData]      = useState(null)   // yesterday, for the comparison line — fetched once, doesn't need the 10s poll
   const [loading,     setLoading]     = useState(true)
   const [lastUpdated, setLastUpdated] = useState(null)
   const timerRef = useRef(null)
@@ -42,6 +51,17 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
     return () => clearInterval(timerRef.current)
   }, [load])
 
+  // Yesterday's snapshot for the "vs yesterday" comparison line — one-shot,
+  // not part of the 10s live poll (it's a closed day, it won't change).
+  useEffect(() => {
+    let cancelled = false
+    authedFetch(`/api/crm-purchases?action=flashcards&date=${istDaysAgo(1)}`)
+      .then(r => r.json())
+      .then(j => { if (!cancelled && !j.error) setYData(j) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
   // ── Derived metrics — keep keys aligned with the Live Feed page ──────────
   const walkinCount    = data?.walkinSummary?.total                       || 0
   // Conversion is measured against FRESH walk-ins only (those who walked in
@@ -56,6 +76,15 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
   // second lens alongside the bill-count conversion above: a branch can bill
   // fewer customers but land more grams (or vice versa), so both matter.
   const weightConversionPct = walkinWt > 0 ? Math.round((purchasedWt / walkinWt) * 100) : 0
+
+  // Yesterday's mirror of the same four figures, for the comparison line.
+  const yWalkinCount    = yData?.walkinSummary?.total                   || 0
+  const yFreshWalkins   = yData?.walkinSummary?.fresh ?? yWalkinCount
+  const yWalkinWt       = parseFloat(yData?.goldPipeline?.walked_in_wt) || 0
+  const yPurchasedCount = yData?.summary?.approved                      || 0
+  const yPurchasedWt    = parseFloat(yData?.goldPipeline?.purchased_wt) || 0
+  const yConversionPct  = yFreshWalkins > 0 ? Math.round((yPurchasedCount / yFreshWalkins) * 100) : 0
+  const yWeightConversionPct = yWalkinWt > 0 ? Math.round((yPurchasedWt / yWalkinWt) * 100) : 0
 
   const minsAgo = lastUpdated ? Math.floor((Date.now() - lastUpdated.getTime()) / 60000) : null
   const liveLabel = !lastUpdated ? 'loading…' : minsAgo === 0 ? 'just now' : `${minsAgo}m ago`
@@ -108,6 +137,8 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
           sub={walkinWt > 0 ? `${fmtWt(walkinWt)} gross weight` : 'no weight yet'}
           loading={loading && !data}
           isMobile={isMobile}
+          prevValue={yData ? yWalkinCount : null}
+          deltaPct={yData ? pctDelta(walkinCount, yWalkinCount) : null}
         />
         <FlashCard
           t={t} accent={t.gold}
@@ -117,6 +148,8 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
           sub={purchasedWt > 0 ? `${fmtWt(purchasedWt)} gross weight` : '—'}
           loading={loading && !data}
           isMobile={isMobile}
+          prevValue={yData ? yPurchasedCount : null}
+          deltaPct={yData ? pctDelta(purchasedCount, yPurchasedCount) : null}
         />
         <FlashCard
           t={t} accent={conversionPct >= 50 ? t.green : conversionPct >= 25 ? t.gold : t.orange || t.red}
@@ -127,6 +160,8 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
           loading={loading && !data}
           isMobile={isMobile}
           progress={Math.min(100, conversionPct)}
+          prevValue={yData ? `${yConversionPct}%` : null}
+          deltaPct={yData ? pctDelta(conversionPct, yConversionPct) : null}
         />
         <FlashCard
           t={t} accent={weightConversionPct >= 50 ? t.green : weightConversionPct >= 25 ? t.gold : t.orange || t.red}
@@ -137,6 +172,8 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
           loading={loading && !data}
           isMobile={isMobile}
           progress={Math.min(100, weightConversionPct)}
+          prevValue={yData ? `${yWeightConversionPct}%` : null}
+          deltaPct={yData ? pctDelta(weightConversionPct, yWeightConversionPct) : null}
         />
       </div>
 
@@ -148,7 +185,7 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
   )
 }
 
-function FlashCard({ t, accent, label, value, unit, sub, loading, isMobile, progress }) {
+function FlashCard({ t, accent, label, value, unit, sub, loading, isMobile, progress, prevValue, deltaPct }) {
   const [vis, setVis] = useState(false)
   useEffect(() => { const id = setTimeout(() => setVis(true), 40); return () => clearTimeout(id) }, [])
   return (
@@ -189,6 +226,18 @@ function FlashCard({ t, accent, label, value, unit, sub, loading, isMobile, prog
 
       {sub && !loading && (
         <div style={{ fontSize: isMobile ? 9.5 : 10.5, color: t.text3, fontWeight: 700, marginTop: isMobile ? 5 : 7, lineHeight: 1.35 }}>{sub}</div>
+      )}
+
+      {/* Vs-yesterday comparison — absolute previous value + delta. */}
+      {prevValue != null && !loading && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', marginTop: isMobile ? 4 : 5 }}>
+          <span style={{ fontSize: isMobile ? 8.5 : 9.5, color: t.text4 }}>Yday: <b style={{ color: t.text3, fontWeight: 700 }}>{prevValue}</b></span>
+          {deltaPct != null && (
+            <span style={{ fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, color: deltaPct >= 0 ? t.green : t.red }}>
+              {deltaPct >= 0 ? '▲' : '▼'}{Math.abs(deltaPct)}%
+            </span>
+          )}
+        </div>
       )}
 
       {/* Progress bar for the Conversion tile */}

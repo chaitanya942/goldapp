@@ -35,6 +35,29 @@ function getRange(key) {
   return { from: null, to: null, label: 'All Time' }
 }
 
+// The comparison period floats with whatever range is selected: N days
+// selected → the immediately preceding N days (inclusive on both ends, no
+// gap and no overlap). E.g. 10–16 Sep (7 days) → 3–9 Sep. 18 Aug–16 Sep
+// (30 days) → 19 Jul–17 Aug. A single day (16 Sep) → 15 Sep. Undefined for
+// "All Time" (no fixed-length window to mirror).
+function getPrevRange(from, to) {
+  if (!from || !to) return { from: null, to: null }
+  const f = new Date(`${from}T00:00:00Z`)
+  const l = new Date(`${to}T00:00:00Z`)
+  const days = Math.round((l - f) / 86400000) + 1
+  const prevTo = new Date(f); prevTo.setUTCDate(prevTo.getUTCDate() - 1)
+  const prevFrom = new Date(prevTo); prevFrom.setUTCDate(prevFrom.getUTCDate() - (days - 1))
+  const iso = (d) => d.toISOString().slice(0, 10)
+  return { from: iso(prevFrom), to: iso(prevTo) }
+}
+
+// % change of curr vs prev — null when there's nothing meaningful to compare.
+function pctChange(curr, prev) {
+  const c = Number(curr) || 0, p = Number(prev) || 0
+  if (p === 0) return c === 0 ? null : 100
+  return ((c - p) / p) * 100
+}
+
 // Read-only consignment balance view for the dashboard.
 // Shows the management team how much gold is "still at branches" vs "currently
 // moving" between branches / hub / HO. No buttons, no actions — this is the
@@ -560,7 +583,7 @@ function DashFilterPill({ active, color, onClick, t, children }) {
   )
 }
 
-function KpiCard({ label, value, sub, color, icon, loading, t, delay=0, compact=false }) {
+function KpiCard({ label, value, sub, prevValue, deltaPct, color, icon, loading, t, delay=0, compact=false }) {
   const [hov, setHov] = useState(false)
   const [vis, setVis] = useState(false)
   useEffect(() => { const id = setTimeout(()=>setVis(true), delay); return ()=>clearTimeout(id) }, [delay])
@@ -586,6 +609,19 @@ function KpiCard({ label, value, sub, color, icon, loading, t, delay=0, compact=
         : <div style={{ fontSize: compact ? 22 : 28, fontWeight:200, color, letterSpacing:'-.02em', lineHeight:1, fontVariantNumeric:'tabular-nums', animation:'countUp 0.5s ease' }}>{value ?? '—'}</div>
       }
       {sub && !loading && !compact && <div style={{ fontSize:12, color:t.text4, marginTop:9, lineHeight:1.4 }}>{sub}</div>}
+      {/* Previous-period comparison — same filters, immediately preceding
+          window of equal length. Omitted when there's nothing to compare
+          against (e.g. "All Time", or the prior window had no data). */}
+      {!loading && prevValue != null && (
+        <div style={{ display:'flex', alignItems:'center', gap:7, marginTop: sub && !compact ? 6 : 9, flexWrap:'wrap' }}>
+          <span style={{ fontSize: compact ? 10 : 11, color:t.text4 }}>Prev: <b style={{ color:t.text3, fontWeight:600 }}>{prevValue}</b></span>
+          {deltaPct != null && (
+            <span style={{ fontSize: compact ? 10 : 11, fontWeight:700, color: deltaPct >= 0 ? t.green : t.red }}>
+              {deltaPct >= 0 ? '▲' : '▼'} {Math.abs(deltaPct).toFixed(1)}%
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -758,6 +794,10 @@ export default function DashboardHome() {
   }, [])
   const [loading,       setLoading]       = useState(true)
   const [kpis,          setKpis]          = useState(null)
+  // KPIs for the comparison window (see getPrevRange) — same filters, the
+  // immediately preceding period of equal length. null while unavailable
+  // (e.g. "All Time", or the window came back empty).
+  const [prevKpis,      setPrevKpis]      = useState(null)
   const [stateData,     setStateData]     = useState([])
   const [topBranches,    setTopBranches]    = useState([])
   const [bottomBranches, setBottomBranches] = useState([])
@@ -1057,8 +1097,9 @@ export default function DashboardHome() {
       setTopBranches([])
       setBottomBranches([])
     }
-    const finishEmpty = () => { if (!silent) { setKpis(null); setLoading(false) } }
+    const finishEmpty = () => { if (!silent) { setKpis(null); setPrevKpis(null); setLoading(false) } }
     const { from, to } = getRange(period)
+    const { from: prevFrom, to: prevTo } = getPrevRange(from, to)
 
     // Region scoping: resolve the user's allowed branches BY DIRECTLY QUERYING branches.
     // Don't rely on branchMeta state — it may not have loaded yet, or may be holding
@@ -1111,24 +1152,35 @@ export default function DashboardHome() {
     // Route through /api/report-aggregates which enforces region scoping server-side
     // via lib/apiAuth — authoritative even if client-side regionAccess hasn't resolved
     // yet. The server intersects p_region_branches with the user's allowed branches.
-    const params = new URLSearchParams()
-    if (from)         params.set('from', from)
-    if (to)           params.set('to', to)
-    if (p_branch)     params.set('branch', p_branch)
-    if (p_region_branches?.length) params.set('region_branches', p_region_branches.join(','))
-    if (from === to)  params.set('single_day', 'true')
+    const buildParams = (f, tt) => {
+      const p = new URLSearchParams()
+      if (f)  p.set('from', f)
+      if (tt) p.set('to', tt)
+      if (p_branch)     p.set('branch', p_branch)
+      if (p_region_branches?.length) p.set('region_branches', p_region_branches.join(','))
+      if (f === tt) p.set('single_day', 'true')
+      return p
+    }
     // Single source of truth: Supabase via /api/report-aggregates. The
     // earlier CRM-live override pulled headline KPIs from a CRM endpoint
     // to "make the dashboard match the flashcards instantly" — but that
     // override's NET weight came out wrong (35% short, then 30% short
     // again) and the visible regression to stakeholders was a much bigger
     // cost than the 10s sync drift it tried to eliminate. Trust the sync.
-    const aggRes = await authedFetch(`/api/report-aggregates?${params}`)
+    // The comparison-period fetch (same filters, the immediately preceding
+    // window of equal length — see getPrevRange) rides alongside it so every
+    // KPI card can show current vs previous without a second round trip.
+    const [aggRes, prevRes] = await Promise.all([
+      authedFetch(`/api/report-aggregates?${buildParams(from, to)}`),
+      prevFrom ? authedFetch(`/api/report-aggregates?${buildParams(prevFrom, prevTo)}`) : Promise.resolve(null),
+    ])
     const aggJson = await aggRes.json().catch(() => ({}))
     if (aggJson?.empty || !aggJson?.kpis) { finishEmpty(); return }
     const data = aggJson
+    const prevJson = prevRes ? await prevRes.json().catch(() => ({})) : null
 
     setKpis(data.kpis || null)
+    setPrevKpis(prevJson?.kpis || null)
     if (!silent) setLoading(false)
 
     // State/branch breakdowns from the same Supabase aggregate.
@@ -1188,6 +1240,7 @@ export default function DashboardHome() {
 
   const maxStateNet  = Math.max(...stateData.map(s=>Number(s.total_net||0)), 1)
   const hasData      = kpis?.total_count > 0
+  const hasPrevData  = hasData && prevKpis?.total_count > 0
   const hasStateData = stateData.filter(s=>s.state && Number(s.total_net||0)>0).length > 0
   const physPct      = hasData ? (kpis.physical_count/kpis.total_count)*100 : 0
   const takePct      = hasData ? (kpis.takeover_count/kpis.total_count)*100 : 0
@@ -1563,18 +1616,34 @@ export default function DashboardHome() {
             {showKpiCards && <>
               {/* KPI Row 1 */}
               <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: isMobile ? 10 : 14, marginBottom: isMobile ? 10 : 14 }}>
-                <KpiCard t={t} delay={0}   label="Total Bills"          icon="🧾" color={t.gold}  loading={loading} value={hasData?Number(kpis.total_count).toLocaleString('en-IN'):'—'} sub={periodLabel} compact={isMobile}/>
-                <KpiCard t={t} delay={60}  label="Total Net Weight"     icon="⚖️" color={t.gold}  loading={loading} value={hasData?`${fmt(kpis.total_net)}g`:'—'} sub="Net weight purchased" compact={isMobile}/>
-                <KpiCard t={t} delay={120} label="Gross Purchase Value" icon="₹"  color={t.green} loading={loading} value={hasData?fmtCr(kpis.total_value):'—'} sub="Before service charges" compact={isMobile}/>
-                <KpiCard t={t} delay={180} label="Avg Rate / Gram"      icon="📈" color={t.green} loading={loading} value={hasData&&kpis.avg_rate_per_gram>0?`₹${Number(kpis.avg_rate_per_gram).toLocaleString('en-IN',{maximumFractionDigits:0})}/g`:'—'} sub="Gross value ÷ net weight" compact={isMobile}/>
+                <KpiCard t={t} delay={0}   label="Total Bills"          icon="🧾" color={t.gold}  loading={loading} value={hasData?Number(kpis.total_count).toLocaleString('en-IN'):'—'} sub={periodLabel} compact={isMobile}
+                  prevValue={hasPrevData ? Number(prevKpis.total_count).toLocaleString('en-IN') : null}
+                  deltaPct={hasPrevData ? pctChange(kpis?.total_count, prevKpis.total_count) : null}/>
+                <KpiCard t={t} delay={60}  label="Total Net Weight"     icon="⚖️" color={t.gold}  loading={loading} value={hasData?`${fmt(kpis.total_net)}g`:'—'} sub="Net weight purchased" compact={isMobile}
+                  prevValue={hasPrevData ? `${fmt(prevKpis.total_net)}g` : null}
+                  deltaPct={hasPrevData ? pctChange(kpis?.total_net, prevKpis.total_net) : null}/>
+                <KpiCard t={t} delay={120} label="Gross Purchase Value" icon="₹"  color={t.green} loading={loading} value={hasData?fmtCr(kpis.total_value):'—'} sub="Before service charges" compact={isMobile}
+                  prevValue={hasPrevData ? fmtCr(prevKpis.total_value) : null}
+                  deltaPct={hasPrevData ? pctChange(kpis?.total_value, prevKpis.total_value) : null}/>
+                <KpiCard t={t} delay={180} label="Avg Rate / Gram"      icon="📈" color={t.green} loading={loading} value={hasData&&kpis.avg_rate_per_gram>0?`₹${Number(kpis.avg_rate_per_gram).toLocaleString('en-IN',{maximumFractionDigits:0})}/g`:'—'} sub="Gross value ÷ net weight" compact={isMobile}
+                  prevValue={hasPrevData && prevKpis.avg_rate_per_gram>0 ? `₹${Number(prevKpis.avg_rate_per_gram).toLocaleString('en-IN',{maximumFractionDigits:0})}/g` : null}
+                  deltaPct={hasPrevData ? pctChange(kpis?.avg_rate_per_gram, prevKpis.avg_rate_per_gram) : null}/>
               </div>
 
               {/* KPI Row 2 */}
               <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: isMobile ? 10 : 14, marginBottom: isMobile ? 14 : 22 }}>
-                <KpiCard t={t} delay={240} label="Avg Purity"         icon="✦" color={t.purple} loading={loading} value={hasData?fmtPct(kpis.avg_purity):'—'} sub="Weighted by net weight" compact={isMobile}/>
-                <KpiCard t={t} delay={300} label="Avg Wt / Bill"      icon="◈" color={t.text2}  loading={loading} value={hasData?`${fmt(kpis.avg_net_per_txn)}g`:'—'} sub="Net weight ÷ bills" compact={isMobile}/>
-                <KpiCard t={t} delay={360} label="Avg Service Charge" icon="%" color={t.red}    loading={loading} value={hasData?`${Number(kpis.avg_service_charge_pct||0).toFixed(2)}%`:'—'} sub="Service charge ÷ gross value" compact={isMobile}/>
-                <KpiCard t={t} delay={420} label="Active Branches"    icon="⬡" color={t.blue}   loading={loading} value={hasData?`${kpis.branch_count} / ${totalBranches}`:`— / ${totalBranches}`} sub={hasData?'branches purchased this period':'No purchases this period'} compact={isMobile}/>
+                <KpiCard t={t} delay={240} label="Avg Purity"         icon="✦" color={t.purple} loading={loading} value={hasData?fmtPct(kpis.avg_purity):'—'} sub="Weighted by net weight" compact={isMobile}
+                  prevValue={hasPrevData ? fmtPct(prevKpis.avg_purity) : null}
+                  deltaPct={hasPrevData ? pctChange(kpis?.avg_purity, prevKpis.avg_purity) : null}/>
+                <KpiCard t={t} delay={300} label="Avg Wt / Bill"      icon="◈" color={t.text2}  loading={loading} value={hasData?`${fmt(kpis.avg_net_per_txn)}g`:'—'} sub="Net weight ÷ bills" compact={isMobile}
+                  prevValue={hasPrevData ? `${fmt(prevKpis.avg_net_per_txn)}g` : null}
+                  deltaPct={hasPrevData ? pctChange(kpis?.avg_net_per_txn, prevKpis.avg_net_per_txn) : null}/>
+                <KpiCard t={t} delay={360} label="Avg Service Charge" icon="%" color={t.red}    loading={loading} value={hasData?`${Number(kpis.avg_service_charge_pct||0).toFixed(2)}%`:'—'} sub="Service charge ÷ gross value" compact={isMobile}
+                  prevValue={hasPrevData ? `${Number(prevKpis.avg_service_charge_pct||0).toFixed(2)}%` : null}
+                  deltaPct={hasPrevData ? pctChange(kpis?.avg_service_charge_pct, prevKpis.avg_service_charge_pct) : null}/>
+                <KpiCard t={t} delay={420} label="Active Branches"    icon="⬡" color={t.blue}   loading={loading} value={hasData?`${kpis.branch_count} / ${totalBranches}`:`— / ${totalBranches}`} sub={hasData?'branches purchased this period':'No purchases this period'} compact={isMobile}
+                  prevValue={hasPrevData ? `${prevKpis.branch_count} / ${totalBranches}` : null}
+                  deltaPct={hasPrevData ? pctChange(kpis?.branch_count, prevKpis.branch_count) : null}/>
               </div>
 
               {/* Purchase Mix */}
