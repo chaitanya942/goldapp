@@ -28,7 +28,7 @@ import GoldSpinner from '../ui/GoldSpinner'
 import AnimatedNumber from '../ui/AnimatedNumber'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
-import { istToday, addWorkingDaysSkipSunday } from '../../lib/dateIst'
+import { istToday, istDaysAgo, addWorkingDaysSkipSunday } from '../../lib/dateIst'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 // A bill that was internally transferred (branch → hub) groups under the branch it
@@ -139,6 +139,40 @@ const STATUS_META = {
   cancelled: { label: 'Cancelled', color: '#e05555' },  // red
 }
 
+// Aggregate a day's live (non-cancelled) booking rows into the three figures
+// the top-of-page comparison band shows. Value is Σ(weight × rate) since
+// rate is a per-gram price, not a total.
+const summarizeBookings = (rows) => {
+  const count  = (rows || []).length
+  const weight = (rows || []).reduce((s, r) => s + (Number(r.weight) || 0), 0)
+  const value  = (rows || []).reduce((s, r) => s + (Number(r.weight) || 0) * (Number(r.rate) || 0), 0)
+  return { count, weight, value }
+}
+// % change of curr vs prev — null when there's nothing to compare (both
+// zero), so the badge can be omitted instead of showing a meaningless "0%".
+const bookingPctDelta = (curr, prev) => {
+  if (prev > 0) return Math.round((curr - prev) / prev * 100)
+  if (curr > 0) return 100
+  return null
+}
+
+// One figure inside a comparison card, with an optional ▲/▼ delta badge.
+function CmpStat({ t, label, value, delta }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.04em', textTransform: 'uppercase', fontWeight: 700 }}>{label}</span>
+      <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+        <span style={{ fontSize: 15, color: t.text1, fontWeight: 800, fontFamily: 'monospace' }}>{value}</span>
+        {delta != null && (
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: delta >= 0 ? t.green : t.red }}>
+            {delta >= 0 ? '▲' : '▼'}{Math.abs(delta)}%
+          </span>
+        )}
+      </span>
+    </div>
+  )
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 export default function BiddingVolume() {
   const { theme, setActiveNav, setConsignmentDeepLink } = useApp()
@@ -164,6 +198,14 @@ export default function BiddingVolume() {
   const [attachTarget, setAttachTarget] = useState(null)             // { bill } — residual bill being attached to a prior booking
   const [supply,       setSupply]       = useState(null)
   const [bookingsResp, setBookingsResp] = useState(null)
+  // Today-vs-yesterday comparison band (top of page) — independent of
+  // bookingsDate/bookingsResp above (which pivot on whatever bidding day
+  // ops has navigated to). Always compares the actual calendar today
+  // against actual yesterday, fetched once on mount and refreshed after
+  // any booking action via the same fetchAll() call that refreshes
+  // bookingsResp — see fetchAll below.
+  const [cmpToday,     setCmpToday]     = useState(null)
+  const [cmpYesterday, setCmpYesterday] = useState(null)
   const [loading,      setLoading]      = useState(true)
   const [error,        setError]        = useState(null)
   const [showBookModal, setShowBookModal] = useState(false)
@@ -297,11 +339,15 @@ export default function BiddingVolume() {
     if (!silent) setLoading(true)
     setError(null)
     try {
-      const [supR, bkR] = await Promise.all([
+      const [supR, bkR, cmpTodayR, cmpYestR] = await Promise.all([
         authedFetch(`/api/consignments?action=bidding_volume&date=${arrivalDate}`),
         // Bookings use bidding_date (created_at IST) — so the operator sees
         // bookings on the day they were placed, not the arrival day.
         authedFetch(`/api/consignments?action=bidding_bookings&bidding_date=${bookingsDate}`),
+        // Today-vs-yesterday comparison band — always the real calendar day,
+        // independent of whatever bidding day ops has navigated bookingsDate to.
+        authedFetch(`/api/consignments?action=bidding_bookings&bidding_date=${istToday()}`),
+        authedFetch(`/api/consignments?action=bidding_bookings&bidding_date=${istDaysAgo(1)}`),
       ])
       const supJ = await supR.json()
       const bkJ  = await bkR.json()
@@ -309,6 +355,11 @@ export default function BiddingVolume() {
       if (!bkR.ok  || bkJ.error)  throw new Error(bkJ.error  || `Bookings HTTP ${bkR.status}`)
       setSupply(supJ.data)
       setBookingsResp(bkJ.data)
+      // Comparison band is best-effort — a hiccup here shouldn't block the
+      // rest of the page from loading.
+      const [cmpTodayJ, cmpYestJ] = await Promise.all([cmpTodayR.json().catch(() => null), cmpYestR.json().catch(() => null)])
+      setCmpToday((cmpTodayJ?.data?.bookings || []).filter(b => b.status !== 'cancelled'))
+      setCmpYesterday((cmpYestJ?.data?.bookings || []).filter(b => b.status !== 'cancelled'))
     } catch (e) {
       setError(String(e?.message || e))
     } finally {
@@ -1430,6 +1481,41 @@ export default function BiddingVolume() {
           onError={(msg) => showToast(msg, 'error')}
         />
       )}
+
+      {/* ── Today vs Yesterday bookings comparison ──
+            Always the real calendar today/yesterday, independent of whatever
+            bidding day the Bookings tab (bookingsDate) is navigated to — so
+            ops can compare the current day's booking activity against the
+            previous day at a glance, regardless of what else they're doing
+            on this page. */}
+      {(cmpToday != null && cmpYesterday != null) && (() => {
+        const tSum = summarizeBookings(cmpToday)
+        const ySum = summarizeBookings(cmpYesterday)
+        const cards = [
+          { label: 'Today', accent: t.gold, sum: tSum, delta: {
+              count:  bookingPctDelta(tSum.count,  ySum.count),
+              weight: bookingPctDelta(tSum.weight, ySum.weight),
+              value:  bookingPctDelta(tSum.value,  ySum.value),
+            } },
+          { label: 'Yesterday', accent: t.text3, sum: ySum, delta: null },
+        ]
+        return (
+          <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 10 }}>
+            {cards.map(c => (
+              <div key={c.label} style={{ flex: 1, minWidth: 0, background: `${c.accent}0a`, border: `1px solid ${c.accent}30`, borderRadius: 14, padding: '12px 18px' }}>
+                <div style={{ fontSize: 10.5, color: c.accent, fontWeight: 800, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 9 }}>
+                  {c.label}'s Bookings
+                </div>
+                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+                  <CmpStat t={t} label="No. of Bookings" value={fmtNum(c.sum.count)} delta={c.delta?.count} />
+                  <CmpStat t={t} label="Booking Weight"  value={`${fmt(c.sum.weight, 2)} g`} delta={c.delta?.weight} />
+                  <CmpStat t={t} label="Booking Value"   value={fmtINR(c.sum.value)} delta={c.delta?.value} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      })()}
 
       {/* ── Today's purchases · region-wise band (ops summary) ── */}
       {(() => {
