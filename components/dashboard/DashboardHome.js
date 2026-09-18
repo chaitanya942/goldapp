@@ -273,7 +273,7 @@ function ConsignmentBalanceView({ t, stats, isMobile, setActiveNav }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14 }}>
         <DashConsSection
-          t={t} title="Branch In Stock" subtitle="awaiting consignment" accent={t.orange}
+          t={t} title="Stock In Branch" subtitle="awaiting consignment" accent={t.orange}
           regions={stockRegions}
           getTotals={stockRegionTotals}
           getBranches={(r) => stockByRegion[r] || []}

@@ -234,7 +234,7 @@ export default function ConsignmentOverviewWidget({ t, isMobile, setActiveNav })
             padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 4,
           }}>
           <span style={{ fontSize: 10, color: t.orange, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 800 }}>
-            Total Branch in Stock
+            Total Stock In Branch
           </span>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 18, color: t.text1, fontWeight: 800, fontFamily: 'monospace', fontVariantNumeric: 'tabular-nums' }}>
@@ -269,7 +269,7 @@ export default function ConsignmentOverviewWidget({ t, isMobile, setActiveNav })
 
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14 }}>
         <ConsSection
-          t={t} title="Branch In Stock" subtitle="awaiting consignment" accent={t.orange}
+          t={t} title="Stock In Branch" subtitle="awaiting consignment" accent={t.orange}
           regions={stockRegions}
           getTotals={stockRegionTotals}
           getBranches={(r) => stockByRegion[r] || []}
