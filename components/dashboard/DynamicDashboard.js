@@ -63,11 +63,29 @@ function getPrevRange(from, to) {
   return { from: iso(prevFrom), to: iso(prevTo) }
 }
 
-// % change of curr vs prev — null when there's nothing meaningful to compare.
-function pctChange(curr, prev) {
+// Relative % change, signed and formatted — for absolute/count/weight/value
+// metrics (bills, net weight, gross value, avg rate/g, avg wt/bill). Null
+// when there's nothing meaningful to compare (both zero).
+function fmtPctChange(curr, prev) {
   const c = Number(curr) || 0, p = Number(prev) || 0
-  if (p === 0) return c === 0 ? null : 100
-  return ((c - p) / p) * 100
+  if (p === 0) return c === 0 ? null : '+100.0%'
+  const d = ((c - p) / p) * 100
+  return `${d >= 0 ? '+' : ''}${d.toFixed(1)}%`
+}
+// Absolute percentage-POINT change — for metrics that are ALREADY a
+// percentage (avg purity, avg service charge). A relative "% change of a %"
+// reads as a much bigger move than it is; the point difference is what's
+// actually meaningful here.
+function fmtPointChange(curr, prev) {
+  if (curr == null || prev == null) return null
+  const d = Number(curr) - Number(prev)
+  return `${d >= 0 ? '+' : ''}${d.toFixed(2)}pp`
+}
+// Absolute change for a plain count (e.g. active branches).
+function fmtCountChange(curr, prev, noun) {
+  const d = Math.round(Number(curr) || 0) - Math.round(Number(prev) || 0)
+  const suffix = noun ? ` ${noun}${Math.abs(d) === 1 ? '' : 's'}` : ''
+  return `${d >= 0 ? '+' : ''}${d}${suffix}`
 }
 
 // ── Shared shimmer ────────────────────────────────────────────────────────────
@@ -88,7 +106,7 @@ function useMobile() {
 }
 
 // ── KPI card (purchase overview style) ───────────────────────────────────────
-function KpiCard({ label, value, sub, prevValue, deltaPct, color, icon, loading, t, delay=0, compact=false }) {
+function KpiCard({ label, value, sub, prevValue, changeText, color, icon, loading, t, delay=0, compact=false }) {
   const [vis, setVis] = useState(false)
   useEffect(() => { const id = setTimeout(()=>setVis(true),delay); return ()=>clearTimeout(id) }, [delay])
   return (
@@ -108,12 +126,14 @@ function KpiCard({ label, value, sub, prevValue, deltaPct, color, icon, loading,
           window of equal length (see getPrevRange). Omitted when there's
           nothing to compare against. */}
       {!loading && prevValue != null && (
-        <div style={{ display:'flex', alignItems:'center', gap:7, marginTop: sub ? 6 : 8, flexWrap:'wrap' }}>
-          <span style={{ fontSize: compact ? 10 : 11, color:t.text4 }}>Prev: <b style={{ color:t.text3, fontWeight:600 }}>{prevValue}</b></span>
-          {deltaPct != null && (
-            <span style={{ fontSize: compact ? 10 : 11, fontWeight:700, color: deltaPct >= 0 ? t.green : t.red }}>
-              {deltaPct >= 0 ? '▲' : '▼'} {Math.abs(deltaPct).toFixed(1)}%
-            </span>
+        <div style={{ marginTop: sub ? 8 : 10, paddingTop: 8, borderTop: `1px dashed ${t.border}`, display:'flex', flexDirection:'column', gap: 3 }}>
+          <div style={{ fontSize: compact ? 10.5 : 11.5, color:t.text3 }}>
+            Previous period: <b style={{ color:t.text1, fontWeight:700 }}>{prevValue}</b>
+          </div>
+          {changeText != null && (
+            <div style={{ fontSize: compact ? 10.5 : 11.5, fontWeight:800, color: changeText.trim().startsWith('-') ? t.red : t.green }}>
+              Change: {changeText.trim().startsWith('-') ? '▼' : '▲'} {changeText}
+            </div>
           )}
         </div>
       )}
@@ -527,30 +547,30 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
           <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: isMobile ? 10 : 14 }}>
             <KpiCard t={t} delay={0}   label="Total Bills"          icon="🧾" color={t.gold}   loading={loading} compact={isMobile} value={hasData?Number(kpis.total_count).toLocaleString('en-IN'):'—'} sub={periodLabel}
               prevValue={hasPrevData ? Number(prevKpis.total_count).toLocaleString('en-IN') : null}
-              deltaPct={hasPrevData ? pctChange(kpis?.total_count, prevKpis.total_count) : null}/>
+              changeText={hasPrevData ? fmtPctChange(kpis?.total_count, prevKpis.total_count) : null}/>
             <KpiCard t={t} delay={60}  label="Total Net Weight"     icon="⚖️" color={t.gold}   loading={loading} compact={isMobile} value={hasData?`${fmt(kpis.total_net)}g`:'—'} sub="Net weight purchased"
               prevValue={hasPrevData ? `${fmt(prevKpis.total_net)}g` : null}
-              deltaPct={hasPrevData ? pctChange(kpis?.total_net, prevKpis.total_net) : null}/>
+              changeText={hasPrevData ? fmtPctChange(kpis?.total_net, prevKpis.total_net) : null}/>
             <KpiCard t={t} delay={120} label="Gross Purchase Value" icon="₹"  color={t.green}  loading={loading} compact={isMobile} value={hasData?fmtCr(kpis.total_value):'—'} sub="Before service charges"
               prevValue={hasPrevData ? fmtCr(prevKpis.total_value) : null}
-              deltaPct={hasPrevData ? pctChange(kpis?.total_value, prevKpis.total_value) : null}/>
+              changeText={hasPrevData ? fmtPctChange(kpis?.total_value, prevKpis.total_value) : null}/>
             <KpiCard t={t} delay={180} label="Avg Rate / Gram"      icon="📈" color={t.green}  loading={loading} compact={isMobile} value={hasData&&kpis.avg_rate_per_gram>0?`₹${Number(kpis.avg_rate_per_gram).toLocaleString('en-IN',{maximumFractionDigits:0})}/g`:'—'} sub="Gross value ÷ net weight"
               prevValue={hasPrevData && prevKpis.avg_rate_per_gram>0 ? `₹${Number(prevKpis.avg_rate_per_gram).toLocaleString('en-IN',{maximumFractionDigits:0})}/g` : null}
-              deltaPct={hasPrevData ? pctChange(kpis?.avg_rate_per_gram, prevKpis.avg_rate_per_gram) : null}/>
+              changeText={hasPrevData ? fmtPctChange(kpis?.avg_rate_per_gram, prevKpis.avg_rate_per_gram) : null}/>
           </div>
           <div style={{ display:'grid', gridTemplateColumns: isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)', gap: isMobile ? 10 : 14 }}>
             <KpiCard t={t} delay={240} label="Avg Purity"         icon="✦"  color={t.purple} loading={loading} compact={isMobile} value={hasData?fmtPct(kpis.avg_purity):'—'} sub="Weighted by net weight"
               prevValue={hasPrevData ? fmtPct(prevKpis.avg_purity) : null}
-              deltaPct={hasPrevData ? pctChange(kpis?.avg_purity, prevKpis.avg_purity) : null}/>
+              changeText={hasPrevData ? fmtPointChange(kpis?.avg_purity, prevKpis.avg_purity) : null}/>
             <KpiCard t={t} delay={300} label="Avg Wt / Bill"      icon="◈"  color={t.text2}  loading={loading} compact={isMobile} value={hasData?`${fmt(kpis.avg_net_per_txn)}g`:'—'} sub="Net weight ÷ bills"
               prevValue={hasPrevData ? `${fmt(prevKpis.avg_net_per_txn)}g` : null}
-              deltaPct={hasPrevData ? pctChange(kpis?.avg_net_per_txn, prevKpis.avg_net_per_txn) : null}/>
+              changeText={hasPrevData ? fmtPctChange(kpis?.avg_net_per_txn, prevKpis.avg_net_per_txn) : null}/>
             <KpiCard t={t} delay={360} label="Avg Service Charge" icon="%"  color={t.red}    loading={loading} compact={isMobile} value={hasData?`${Number(kpis.avg_service_charge_pct||0).toFixed(2)}%`:'—'} sub="Service charge ÷ gross value"
               prevValue={hasPrevData ? `${Number(prevKpis.avg_service_charge_pct||0).toFixed(2)}%` : null}
-              deltaPct={hasPrevData ? pctChange(kpis?.avg_service_charge_pct, prevKpis.avg_service_charge_pct) : null}/>
+              changeText={hasPrevData ? fmtPointChange(kpis?.avg_service_charge_pct, prevKpis.avg_service_charge_pct) : null}/>
             <KpiCard t={t} delay={420} label="Active Branches"    icon="⬡"  color={t.blue}   loading={loading} compact={isMobile} value={hasData?`${kpis.branch_count} / ${totalBranches}`:`— / ${totalBranches}`} sub={hasData?'branches purchased':'No purchases this period'}
               prevValue={hasPrevData ? `${prevKpis.branch_count} / ${totalBranches}` : null}
-              deltaPct={hasPrevData ? pctChange(kpis?.branch_count, prevKpis.branch_count) : null}/>
+              changeText={hasPrevData ? fmtCountChange(kpis?.branch_count, prevKpis.branch_count, 'branch') : null}/>
           </div>
         </>
       )}

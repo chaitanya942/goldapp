@@ -14,13 +14,17 @@ import { istToday, istDaysAgo } from '../../lib/dateIst'
 
 const REFRESH_SECS = 10
 
-// % change of curr vs prev — null when there's nothing meaningful to compare
-// (both zero), so the badge can be omitted instead of showing a stray "0%".
-const pctDelta = (curr, prev) => {
-  if (prev > 0) return Math.round((curr - prev) / prev * 100)
-  if (curr > 0) return 100
+// Relative % change, signed and formatted — for count/weight metrics (walk-
+// ins, purchases). Null when there's nothing meaningful to compare (both zero).
+const fmtPctChange = (curr, prev) => {
+  if (prev > 0) return `${curr >= prev ? '+' : ''}${Math.round((curr - prev) / prev * 100)}%`
+  if (curr > 0) return '+100%'
   return null
 }
+// Absolute percentage-POINT change — for metrics that are ALREADY a
+// percentage (bill/weight conversion). A relative "% change of a %" reads as
+// a much bigger move than it is; the point difference is what's meaningful.
+const fmtPointChange = (curr, prev) => `${curr >= prev ? '+' : ''}${curr - prev}pp`
 
 export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
   const [data,        setData]        = useState(null)
@@ -138,7 +142,7 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
           loading={loading && !data}
           isMobile={isMobile}
           prevValue={yData ? yWalkinCount : null}
-          deltaPct={yData ? pctDelta(walkinCount, yWalkinCount) : null}
+          changeText={yData ? fmtPctChange(walkinCount, yWalkinCount) : null}
         />
         <FlashCard
           t={t} accent={t.gold}
@@ -149,7 +153,7 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
           loading={loading && !data}
           isMobile={isMobile}
           prevValue={yData ? yPurchasedCount : null}
-          deltaPct={yData ? pctDelta(purchasedCount, yPurchasedCount) : null}
+          changeText={yData ? fmtPctChange(purchasedCount, yPurchasedCount) : null}
         />
         <FlashCard
           t={t} accent={conversionPct >= 50 ? t.green : conversionPct >= 25 ? t.gold : t.orange || t.red}
@@ -161,7 +165,7 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
           isMobile={isMobile}
           progress={Math.min(100, conversionPct)}
           prevValue={yData ? `${yConversionPct}%` : null}
-          deltaPct={yData ? pctDelta(conversionPct, yConversionPct) : null}
+          changeText={yData ? fmtPointChange(conversionPct, yConversionPct) : null}
         />
         <FlashCard
           t={t} accent={weightConversionPct >= 50 ? t.green : weightConversionPct >= 25 ? t.gold : t.orange || t.red}
@@ -173,7 +177,7 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
           isMobile={isMobile}
           progress={Math.min(100, weightConversionPct)}
           prevValue={yData ? `${yWeightConversionPct}%` : null}
-          deltaPct={yData ? pctDelta(weightConversionPct, yWeightConversionPct) : null}
+          changeText={yData ? fmtPointChange(weightConversionPct, yWeightConversionPct) : null}
         />
       </div>
 
@@ -185,7 +189,7 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
   )
 }
 
-function FlashCard({ t, accent, label, value, unit, sub, loading, isMobile, progress, prevValue, deltaPct }) {
+function FlashCard({ t, accent, label, value, unit, sub, loading, isMobile, progress, prevValue, changeText }) {
   const [vis, setVis] = useState(false)
   useEffect(() => { const id = setTimeout(() => setVis(true), 40); return () => clearTimeout(id) }, [])
   return (
@@ -228,14 +232,14 @@ function FlashCard({ t, accent, label, value, unit, sub, loading, isMobile, prog
         <div style={{ fontSize: isMobile ? 9.5 : 10.5, color: t.text3, fontWeight: 700, marginTop: isMobile ? 5 : 7, lineHeight: 1.35 }}>{sub}</div>
       )}
 
-      {/* Vs-yesterday comparison — absolute previous value + delta. */}
+      {/* Previous-period (yesterday) comparison — absolute value + change. */}
       {prevValue != null && !loading && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', marginTop: isMobile ? 4 : 5 }}>
-          <span style={{ fontSize: isMobile ? 8.5 : 9.5, color: t.text4 }}>Yday: <b style={{ color: t.text3, fontWeight: 700 }}>{prevValue}</b></span>
-          {deltaPct != null && (
-            <span style={{ fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, color: deltaPct >= 0 ? t.green : t.red }}>
-              {deltaPct >= 0 ? '▲' : '▼'}{Math.abs(deltaPct)}%
-            </span>
+        <div style={{ marginTop: isMobile ? 5 : 6, paddingTop: 5, borderTop: `1px dashed ${t.border}`, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div style={{ fontSize: isMobile ? 8.5 : 9.5, color: t.text3 }}>Previous period: <b style={{ color: t.text1, fontWeight: 700 }}>{prevValue}</b></div>
+          {changeText != null && (
+            <div style={{ fontSize: isMobile ? 8.5 : 9.5, fontWeight: 800, color: changeText.trim().startsWith('-') ? t.red : t.green }}>
+              Change: {changeText.trim().startsWith('-') ? '▼' : '▲'} {changeText}
+            </div>
           )}
         </div>
       )}
