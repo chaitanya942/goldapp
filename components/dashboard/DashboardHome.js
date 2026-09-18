@@ -1857,7 +1857,6 @@ export default function DashboardHome() {
                         </button>
                       ))}
                     </div>
-                    <div style={panelMeta}>Net Weight</div>
                   </div>
                 </div>
                 {loading

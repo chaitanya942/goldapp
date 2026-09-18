@@ -749,7 +749,6 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
                       </button>
                     ))}
                   </div>
-                  <div style={panelMeta}>Net Weight</div>
                 </div>
               </div>
               {loading
