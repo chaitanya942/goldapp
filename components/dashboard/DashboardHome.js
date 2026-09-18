@@ -978,6 +978,11 @@ export default function DashboardHome() {
           const branchValue    = rows.reduce((s, b) => s + Number(b.total_gross_value || 0), 0)
           const branchesActive = rows.filter(r => (r.older_bills || 0) + (r.today_bills || 0) > 0).length
           const urgent         = rows.filter(b => (b.oldest_age_days || 0) > 7).length
+          // Today-only slice of Stock In Branch — feeds the "Branch Stock"
+          // module card so it reflects what's been added today, not the
+          // all-time pending total.
+          const branchTodayBills = rows.reduce((s, b) => s + (b.today_bills  || 0), 0)
+          const branchTodayNetWt = rows.reduce((s, b) => s + Number(b.today_net_wt || 0), 0)
 
           // ── State-wise breakdown (rolls each branch's total under its state) ─
           // Used for the state-split chart in the dashboard widget. Branches with
@@ -1111,6 +1116,7 @@ export default function DashboardHome() {
             inTransit:     movementCount,
             // split for the dashboard balance view
             branchBills, branchWeight, branchValue, branchesActive,
+            branchTodayBills, branchTodayNetWt,
             movementBills, movementWeight, movementValue, movementCount,
             // raw rows for the region-grouped expandable overview.
             // Both are per-branch shaped — same columns (total_bills,
@@ -1512,8 +1518,8 @@ export default function DashboardHome() {
           canSee('consignment-overview') && {
             id: 'consignment-overview', icon: '📦', label: 'Branch Stock', color: t.orange,
             metrics: [
-              { label: 'Branches with Stock', value: consignStats ? String(consignStats.totalBranches) : '—' },
-              { label: 'Urgent Alerts',       value: consignStats ? String(consignStats.urgent) : '—' },
+              { label: "Today's Bills",  value: consignStats ? String(consignStats.branchTodayBills || 0) : '—' },
+              { label: "Today's Net Wt", value: consignStats ? fmtWtDash(consignStats.branchTodayNetWt || 0) : '—' },
             ],
             cta: 'Open Branch Stock',
           },
