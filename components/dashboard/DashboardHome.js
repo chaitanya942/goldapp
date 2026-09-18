@@ -9,7 +9,7 @@ import { authedFetch } from '../../lib/authedFetch'
 import { triggerSync } from '../../lib/triggerSync'
 
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
-import { istNow, istStr, fromUtcDate } from '../../lib/dateIst'
+import { istNow, istStr, fromUtcDate, istToday, istDaysAgo, istLastWeekRange } from '../../lib/dateIst'
 import LiveFeedFlashcards from './LiveFeedFlashcards'
 import MonthProjection from './MonthProjection'
 import TodaysBookingsWidget from './TodaysBookingsWidget'
@@ -111,10 +111,54 @@ const fmtAgeDash = (d) => {
   return `${days}d`
 }
 
+// Re-aggregate a branch_overview row set down to just the bills purchased in
+// [from, to] (inclusive, IST calendar dates), using the per-(branch,
+// purchase_date) breakdown — mirrors ConsignmentOverview.js's date-chip
+// filter exactly, generalised from a Set of individual dates to a range so
+// Today/Yesterday/Last Week/Custom can all reuse it. `range` null = no
+// filter (return `rows` unchanged).
+function applyConsignDateRange(rows, byDateRows, range, todayIst) {
+  if (!range || !byDateRows) return rows
+  const base = Object.fromEntries(rows.map(b => [b.branch_name, b]))
+  const m = {}
+  for (const r of byDateRows) {
+    if (!r.purchase_date || r.purchase_date < range.from || r.purchase_date > range.to) continue
+    const b0 = base[r.branch_name]
+    if (!b0) continue   // branch not in this view (e.g. filtered by region access)
+    let s = m[r.branch_name]
+    if (!s) {
+      s = m[r.branch_name] = {
+        ...b0,
+        today_bills: 0, today_net_wt: 0, older_bills: 0, older_net_wt: 0,
+        total_gross_wt: 0, total_net_wt: 0, total_gross_value: 0,
+        oldest_date: null,
+      }
+    }
+    const isToday = r.purchase_date === todayIst
+    s[isToday ? 'today_bills'  : 'older_bills']  += r.bills
+    s[isToday ? 'today_net_wt' : 'older_net_wt'] += Number(r.net_wt || 0)
+    s.total_gross_wt    += Number(r.gross_wt     || 0)
+    s.total_net_wt      += Number(r.net_wt       || 0)
+    s.total_gross_value += Number(r.gross_value  || 0)
+    if (!s.oldest_date || r.purchase_date < s.oldest_date) s.oldest_date = r.purchase_date
+  }
+  for (const s of Object.values(m)) {
+    s.oldest_age_days = s.oldest_date ? Math.floor((Date.now() - new Date(s.oldest_date).getTime()) / 86400000) : 0
+  }
+  return Object.values(m)
+}
+
 function ConsignmentBalanceView({ t, stats, isMobile, setActiveNav }) {
   const [filterRegion,    setFilterRegion]    = useState('all')
   const [expandedStock,   setExpandedStock]   = useState(() => new Set())
   const [expandedTransit, setExpandedTransit] = useState(() => new Set())
+  // Date filter — Today / Yesterday / Last Week / Custom range / All
+  // (default). Applies to both Branch In Stock and In Transit at once,
+  // re-aggregating from the per-(branch, purchase_date) breakdown rather
+  // than re-fetching, so switching presets is instant.
+  const [dateMode,   setDateMode]   = useState('all')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo,   setCustomTo]   = useState('')
 
   if (!stats || !stats.branchOverviewRaw) {
     return (
@@ -125,12 +169,25 @@ function ConsignmentBalanceView({ t, stats, isMobile, setActiveNav }) {
     )
   }
 
+  const todayIst = istToday()
+  // null = 'all' (no date filter, the historical default).
+  const dateRange =
+    dateMode === 'today'     ? { from: todayIst, to: todayIst } :
+    dateMode === 'yesterday' ? (() => { const y = istDaysAgo(1); return { from: y, to: y } })() :
+    dateMode === 'last_week' ? istLastWeekRange() :
+    dateMode === 'custom' && customFrom ? { from: customFrom, to: customTo || customFrom } :
+    null
+
   // Both columns now read from the same RPC (branch_stock_summary), one
   // call per stock_status. Each row is already per-branch and carries
   // total_bills / total_net_wt / oldest_date / region in the same shape,
-  // so the column-rendering code is identical for both.
-  const stockRows   = (stats.branchOverviewRaw    || []).filter(b => ((b.today_bills || 0) + (b.older_bills || 0)) > 0)
-  const transitRows = (stats.inTransitOverviewRaw || []).filter(b => ((b.today_bills || 0) + (b.older_bills || 0)) > 0)
+  // so the column-rendering code is identical for both. When a date filter
+  // is active, re-aggregate from the per-(branch, purchase_date) breakdown
+  // to just that window first.
+  const stockDated   = applyConsignDateRange(stats.branchOverviewRaw    || [], stats.stockByDate,   dateRange, todayIst)
+  const transitDated = applyConsignDateRange(stats.inTransitOverviewRaw || [], stats.transitByDate, dateRange, todayIst)
+  const stockRows   = stockDated.filter(b => ((b.today_bills || 0) + (b.older_bills || 0)) > 0)
+  const transitRows = transitDated.filter(b => ((b.today_bills || 0) + (b.older_bills || 0)) > 0)
 
   const allRegions = [...new Set([
     ...stockRows.map(b => b.region).filter(Boolean),
@@ -184,6 +241,26 @@ function ConsignmentBalanceView({ t, stats, isMobile, setActiveNav }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Date filter — Today / Yesterday / Last Week / Custom / All. Filters
+          which bills (by purchase_date) count towards both columns below. */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginRight: 4 }}>Purchased</span>
+        <DashFilterPill active={dateMode === 'all'}       color={t.gold} onClick={() => setDateMode('all')}       t={t}>All</DashFilterPill>
+        <DashFilterPill active={dateMode === 'today'}     color={t.gold} onClick={() => setDateMode('today')}     t={t}>Today</DashFilterPill>
+        <DashFilterPill active={dateMode === 'yesterday'} color={t.gold} onClick={() => setDateMode('yesterday')} t={t}>Yesterday</DashFilterPill>
+        <DashFilterPill active={dateMode === 'last_week'} color={t.gold} onClick={() => setDateMode('last_week')} t={t}>Last Week</DashFilterPill>
+        <DashFilterPill active={dateMode === 'custom'}    color={t.gold} onClick={() => setDateMode('custom')}    t={t}>Custom</DashFilterPill>
+        {dateMode === 'custom' && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 4 }}>
+            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+              style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, color: t.text1, fontFamily: 'monospace' }} />
+            <span style={{ color: t.text4, fontSize: 11 }}>→</span>
+            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+              style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, color: t.text1, fontFamily: 'monospace' }} />
+          </span>
+        )}
+      </div>
+
       {/* Region filter chips */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginRight: 4 }}>Region</span>
@@ -882,7 +959,13 @@ export default function DashboardHome() {
           // Still pulled for the legacy roll-up fields (movementBills, etc).
           // The new region-grouped overview reads from in-transit rows above.
           authedFetch('/api/consignments?action=consignments&view=movement_rollup').then(r => r.json()).catch(() => ({ data: [] })),
-        ]).then(([overview, transit, consignList]) => {
+          // Per-(branch, purchase_date) breakdown — powers the widget's
+          // Today/Yesterday/Last Week/Custom date filter by letting it
+          // re-aggregate the same two views to just the bills purchased in
+          // the selected window, without a second round trip per filter change.
+          authedFetch('/api/consignments?action=branch_overview_dates&status=at_branch').then(r => r.json()).catch(() => ({ by_branch_date: [] })),
+          authedFetch('/api/consignments?action=branch_overview_dates&status=in_consignment').then(r => r.json()).catch(() => ({ by_branch_date: [] })),
+        ]).then(([overview, transit, consignList, stockDatesResp, transitDatesResp]) => {
           const rows        = overview.data || []
           const transitRows = transit.data  || []  // per-branch in-transit roll-up
 
@@ -1034,6 +1117,11 @@ export default function DashboardHome() {
             // treats them identically.
             branchOverviewRaw:     rows,
             inTransitOverviewRaw:  transitRows,
+            // per-(branch, purchase_date) breakdown — see the date filter
+            // in ConsignmentBalanceView, which re-aggregates these two
+            // instead of re-fetching whenever the date range changes.
+            stockByDate:   stockDatesResp.by_branch_date   || [],
+            transitByDate: transitDatesResp.by_branch_date || [],
             // legacy: consignment-level list still passed for other widgets
             inTransitRaw:          inMotionList,
             // new richer slices

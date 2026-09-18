@@ -13,6 +13,7 @@
 
 import { useEffect, useState } from 'react'
 import { authedFetch } from '../../lib/authedFetch'
+import { istToday, istDaysAgo, istLastWeekRange } from '../../lib/dateIst'
 
 const REGION_COLORS_DASH = {
   'Andhra Pradesh':    '#5ec1d6',
@@ -39,19 +40,65 @@ const fmtAge = (d) => {
   return `${days}d`
 }
 
+// Re-aggregate a branch_overview row set down to just the bills purchased in
+// [from, to] (inclusive, IST calendar dates), using the per-(branch,
+// purchase_date) breakdown — mirrors ConsignmentOverview.js's date-chip
+// filter, generalised from a Set of individual dates to a range so
+// Today/Yesterday/Last Week/Custom can all reuse it. `range` null = no
+// filter (return `rows` unchanged).
+function applyConsignDateRange(rows, byDateRows, range, todayIst) {
+  if (!range || !byDateRows) return rows
+  const base = Object.fromEntries(rows.map(b => [b.branch_name, b]))
+  const m = {}
+  for (const r of byDateRows) {
+    if (!r.purchase_date || r.purchase_date < range.from || r.purchase_date > range.to) continue
+    const b0 = base[r.branch_name]
+    if (!b0) continue   // branch not in this view (e.g. filtered by region access)
+    let s = m[r.branch_name]
+    if (!s) {
+      s = m[r.branch_name] = {
+        ...b0,
+        today_bills: 0, today_net_wt: 0, older_bills: 0, older_net_wt: 0,
+        total_gross_wt: 0, total_net_wt: 0, total_gross_value: 0,
+        oldest_date: null,
+      }
+    }
+    const isToday = r.purchase_date === todayIst
+    s[isToday ? 'today_bills'  : 'older_bills']  += r.bills
+    s[isToday ? 'today_net_wt' : 'older_net_wt'] += Number(r.net_wt || 0)
+    s.total_gross_wt    += Number(r.gross_wt     || 0)
+    s.total_net_wt      += Number(r.net_wt       || 0)
+    s.total_gross_value += Number(r.gross_value  || 0)
+    if (!s.oldest_date || r.purchase_date < s.oldest_date) s.oldest_date = r.purchase_date
+  }
+  for (const s of Object.values(m)) {
+    s.oldest_age_days = s.oldest_date ? Math.floor((Date.now() - new Date(s.oldest_date).getTime()) / 86400000) : 0
+  }
+  return Object.values(m)
+}
+
 export default function ConsignmentOverviewWidget({ t, isMobile, setActiveNav }) {
   const [stockRows,   setStockRows]   = useState(null)
   const [transitRows, setTransitRows] = useState(null)
+  const [stockByDate,   setStockByDate]   = useState(null)
+  const [transitByDate, setTransitByDate] = useState(null)
 
   useEffect(() => {
     let cancelled = false
     Promise.all([
       authedFetch('/api/consignments?action=branch_overview&status=at_branch&include_bangalore=true').then(r => r.json()).catch(() => ({ data: [] })),
       authedFetch('/api/consignments?action=branch_overview&status=in_consignment&include_bangalore=true').then(r => r.json()).catch(() => ({ data: [] })),
-    ]).then(([a, b]) => {
+      // Per-(branch, purchase_date) breakdown — powers the Today/Yesterday/
+      // Last Week/Custom date filter by re-aggregating these two views to
+      // just the bills purchased in the selected window, client-side.
+      authedFetch('/api/consignments?action=branch_overview_dates&status=at_branch').then(r => r.json()).catch(() => ({ by_branch_date: [] })),
+      authedFetch('/api/consignments?action=branch_overview_dates&status=in_consignment').then(r => r.json()).catch(() => ({ by_branch_date: [] })),
+    ]).then(([a, b, ad, bd]) => {
       if (cancelled) return
       setStockRows(a.data || [])
       setTransitRows(b.data || [])
+      setStockByDate(ad.by_branch_date || [])
+      setTransitByDate(bd.by_branch_date || [])
     })
     return () => { cancelled = true }
   }, [])
@@ -59,6 +106,11 @@ export default function ConsignmentOverviewWidget({ t, isMobile, setActiveNav })
   const [filterRegion,    setFilterRegion]    = useState('all')
   const [expandedStock,   setExpandedStock]   = useState(() => new Set())
   const [expandedTransit, setExpandedTransit] = useState(() => new Set())
+  // Date filter — Today / Yesterday / Last Week / Custom range / All
+  // (default). Applies to both Branch In Stock and In Transit at once.
+  const [dateMode,   setDateMode]   = useState('all')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo,   setCustomTo]   = useState('')
 
   if (stockRows == null || transitRows == null) {
     return (
@@ -69,11 +121,23 @@ export default function ConsignmentOverviewWidget({ t, isMobile, setActiveNav })
     )
   }
 
+  const todayIst = istToday()
+  const dateRange =
+    dateMode === 'today'     ? { from: todayIst, to: todayIst } :
+    dateMode === 'yesterday' ? (() => { const y = istDaysAgo(1); return { from: y, to: y } })() :
+    dateMode === 'last_week' ? istLastWeekRange() :
+    dateMode === 'custom' && customFrom ? { from: customFrom, to: customTo || customFrom } :
+    null
+
   // Both columns now read from the same RPC (branch_stock_summary), one
   // call per stock_status. Each row is per-branch with identical columns,
-  // so the section component handles both identically.
-  const stockFiltered0   = (stockRows   || []).filter(b => ((b.today_bills || 0) + (b.older_bills || 0)) > 0)
-  const transitFiltered0 = (transitRows || []).filter(b => ((b.today_bills || 0) + (b.older_bills || 0)) > 0)
+  // so the section component handles both identically. When a date filter
+  // is active, re-aggregate from the per-(branch, purchase_date) breakdown
+  // to just that window first.
+  const stockDated   = applyConsignDateRange(stockRows,   stockByDate,   dateRange, todayIst)
+  const transitDated = applyConsignDateRange(transitRows, transitByDate, dateRange, todayIst)
+  const stockFiltered0   = stockDated.filter(b => ((b.today_bills || 0) + (b.older_bills || 0)) > 0)
+  const transitFiltered0 = transitDated.filter(b => ((b.today_bills || 0) + (b.older_bills || 0)) > 0)
 
   const allRegions = [...new Set([
     ...stockFiltered0.map(b => b.region).filter(Boolean),
@@ -133,6 +197,26 @@ export default function ConsignmentOverviewWidget({ t, isMobile, setActiveNav })
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* Date filter — Today / Yesterday / Last Week / Custom / All. Filters
+          which bills (by purchase_date) count towards both columns below. */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span style={{ fontSize: 10, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700, marginRight: 4 }}>Purchased</span>
+        <FilterPill active={dateMode === 'all'}       color={t.gold} onClick={() => setDateMode('all')}       t={t}>All</FilterPill>
+        <FilterPill active={dateMode === 'today'}     color={t.gold} onClick={() => setDateMode('today')}     t={t}>Today</FilterPill>
+        <FilterPill active={dateMode === 'yesterday'} color={t.gold} onClick={() => setDateMode('yesterday')} t={t}>Yesterday</FilterPill>
+        <FilterPill active={dateMode === 'last_week'} color={t.gold} onClick={() => setDateMode('last_week')} t={t}>Last Week</FilterPill>
+        <FilterPill active={dateMode === 'custom'}    color={t.gold} onClick={() => setDateMode('custom')}    t={t}>Custom</FilterPill>
+        {dateMode === 'custom' && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 4 }}>
+            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+              style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, color: t.text1, fontFamily: 'monospace' }} />
+            <span style={{ color: t.text4, fontSize: 11 }}>→</span>
+            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+              style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 6, padding: '4px 8px', fontSize: 11, color: t.text1, fontFamily: 'monospace' }} />
+          </span>
+        )}
+      </div>
+
       {/* Totals strap — replaces the old region filter chip row. Per-region
           filtering still works via clicking a distribution-bar segment inside
           either ConsSection (onSegmentClick → setFilterRegion). */}
