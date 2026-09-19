@@ -3035,17 +3035,22 @@ function BookingRateChart({ t, card, date, bookings }) {
   const [selected, setSelected] = useState(null)   // clicked cluster
   const [hovered,  setHovered]  = useState(null)   // hovered cluster
   const [chartWidth, setChartWidth] = useState(0)
-  const wrapRef = useRef(null)
+  // Callback ref, not useRef+useEffect([]) — the wrapping div only mounts
+  // once `loading` finishes (it's inside a conditional branch below), so an
+  // effect with an empty dep array would run while the ref is still null and
+  // never fire again once the div actually appears. A callback ref re-runs
+  // exactly when the node itself attaches, regardless of when that happens.
+  const [wrapEl, setWrapEl] = useState(null)
 
   useEffect(() => {
-    if (!wrapRef.current || typeof ResizeObserver === 'undefined') return
+    if (!wrapEl || typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect?.width
       if (w) setChartWidth(w)
     })
-    ro.observe(wrapRef.current)
+    ro.observe(wrapEl)
     return () => ro.disconnect()
-  }, [])
+  }, [wrapEl])
 
   useEffect(() => {
     let cancelled = false
@@ -3147,7 +3152,7 @@ function BookingRateChart({ t, card, date, bookings }) {
       ) : clusters.length === 0 && rateLine.length === 0 ? (
         <div style={{ height: CHART_HEIGHT, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>No bookings or market data for this day (9 AM–9 PM)</div>
       ) : (
-        <div ref={wrapRef} style={{ position: 'relative', width: '100%', height: CHART_HEIGHT }}>
+        <div ref={setWrapEl} style={{ position: 'relative', width: '100%', height: CHART_HEIGHT }}>
           <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
             <ComposedChart margin={CHART_MARGIN}>
               <CartesianGrid stroke={t.border} strokeOpacity={0.4} vertical={false} />
