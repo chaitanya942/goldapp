@@ -3023,13 +3023,18 @@ function BookingChartLegend({ t }) {
 // every field the spec calls for (time, weight, rate, market reference rate
 // at that time, value, and a reference since cal_quotas has no dedicated
 // booking-number column — falls back to bidder name + a short id fragment).
-function BookingDetailCard({ t, cluster, onClose }) {
+function BookingDetailCard({ t, cluster, date, onClose }) {
   if (!cluster) return null
+  // Include the actual bidding day, not just the time-of-day — otherwise a
+  // booking at, say, 10:42 AM looks identical whichever day is selected,
+  // since minutes-since-midnight (the chart's x-axis) is date-independent
+  // by design (it's what lets the same clock-time slot line up day to day).
+  const whenLabel = `${fmtDateShort(date)}, ${fmtDayMinutes(cluster.minutes)}`
   return (
     <div style={{ marginTop: 10, background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: 10, padding: '12px 14px', maxHeight: 260, overflowY: 'auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <div style={{ fontSize: 11, color: t.text3, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 700 }}>
-          {cluster.count > 1 ? `${cluster.count} bookings near ${fmtDayMinutes(cluster.minutes)}` : `Booking at ${fmtDayMinutes(cluster.minutes)}`}
+          {cluster.count > 1 ? `${cluster.count} bookings near ${whenLabel}` : `Booking at ${whenLabel}`}
         </div>
         <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: t.text4, cursor: 'pointer', fontSize: 14 }}>✕</button>
       </div>
@@ -3178,8 +3183,8 @@ function BookingRateChart({ t, card, date, bookings }) {
         }}>
           {hovered
             ? (hovered.count > 1
-                ? `${hovered.count} bookings around ${fmtDayMinutes(hovered.minutes)} — click to view`
-                : `${fmtDayMinutes(hovered.minutes)} · ${hovered.members[0].party || 'Booking'} · ${fmt(hovered.members[0].weight)}g @ ₹${fmtNum(hovered.members[0].rate)}/g — click for full detail`)
+                ? `${hovered.count} bookings around ${fmtDateShort(date)}, ${fmtDayMinutes(hovered.minutes)} — click to view`
+                : `${fmtDateShort(date)}, ${fmtDayMinutes(hovered.minutes)} · ${hovered.members[0].party || 'Booking'} · ${fmt(hovered.members[0].weight)}g @ ₹${fmtNum(hovered.members[0].rate)}/g — click for full detail`)
             : rateLine.length > 0
               ? `${rateField.label} sell rate, ₹/g, 9 AM–9 PM · click a marker for full detail`
               : 'Market rate data unavailable for this day'}
@@ -3232,7 +3237,7 @@ function BookingRateChart({ t, card, date, bookings }) {
       )}
 
       {clusters.length > 0 && <BookingChartLegend t={t} />}
-      {selected && <BookingDetailCard t={t} cluster={selected} onClose={() => setSelected(null)} />}
+      {selected && <BookingDetailCard t={t} cluster={selected} date={date} onClose={() => setSelected(null)} />}
     </div>
   )
 }
