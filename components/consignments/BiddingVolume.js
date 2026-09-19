@@ -31,8 +31,8 @@ import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
 import { istToday, istDaysAgo, addWorkingDaysSkipSunday, istStartOfDayIso, istEndOfDayIso, fromUtcDate } from '../../lib/dateIst'
 import {
-  ResponsiveContainer, ComposedChart, Line,
-  XAxis, YAxis, CartesianGrid,
+  ResponsiveContainer, ComposedChart, Area,
+  XAxis, YAxis, CartesianGrid, ReferenceLine,
 } from 'recharts'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -2944,13 +2944,14 @@ function HourTick({ x, y, payload, t, hourlyPoints }) {
   const hp = hourlyPoints.find(p => p.minutes === payload.value)
   return (
     <g transform={`translate(${x},${y})`}>
-      <text dy={10} textAnchor="middle" fontSize={9} fill={t.text4}>{fmtDayMinutes(payload.value)}</text>
-      {hp && <text dy={22} textAnchor="middle" fontSize={8} fill={t.text3}>₹{fmtNum(Math.round(hp.rate))}</text>}
+      <circle cy={-2} r={1.5} fill={t.gold} fillOpacity={0.5} />
+      <text dy={11} textAnchor="middle" fontSize={9.5} fontWeight={600} fill={t.text3}>{fmtDayMinutes(payload.value)}</text>
+      {hp && <text dy={23} textAnchor="middle" fontSize={8.5} fontWeight={600} fill={t.gold} fillOpacity={0.75}>₹{fmtNum(Math.round(hp.rate))}</text>}
     </g>
   )
 }
 
-function BookingMarkersOverlay({ t, clusters, chartWidth, yDomain, selected, setSelected, setHovered }) {
+function BookingMarkersOverlay({ t, clusters, chartWidth, yDomain, selected, hovered, setSelected, setHovered }) {
   const scale = makeScales(chartWidth, yDomain)
   return (
     <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
@@ -2960,31 +2961,60 @@ function BookingMarkersOverlay({ t, clusters, chartWidth, yDomain, selected, set
         if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null
         const anyActive = c.members.some(m => m.status !== 'cancelled')
         const color = c.count > 1 ? t.blue : (STATUS_META[c.members[0].status]?.color || t.gold)
-        const r = Math.min(11, 5 + (c.count - 1) * 1.5)
-        const isSelected = clusterKey(selected) === clusterKey(c)
+        const key = clusterKey(c)
+        const isSelected = clusterKey(selected) === key
+        const isHovered  = clusterKey(hovered) === key
+        const baseR = Math.min(11, 6 + (c.count - 1) * 1.5)
+        const r = baseR * (isHovered || isSelected ? 1.25 : 1)
         return (
           <div
-            key={clusterKey(c)}
+            key={key}
             onClick={() => setSelected(c)}
             onMouseEnter={() => setHovered(c)}
             onMouseLeave={() => setHovered(null)}
             style={{
-              position: 'absolute', left: cx - r - 6, top: cy - r - 6, width: (r + 6) * 2, height: (r + 6) * 2,
+              position: 'absolute', left: cx - baseR - 8, top: cy - baseR - 8, width: (baseR + 8) * 2, height: (baseR + 8) * 2,
               pointerEvents: 'auto', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}
           >
             <div style={{
-              width: r * 2, height: r * 2, borderRadius: '50%', background: color,
-              opacity: anyActive ? 0.85 : 0.35, border: `1.5px solid ${isSelected ? t.text1 : t.card}`,
-              boxShadow: isSelected ? `0 0 0 2.5px ${t.text1}55` : 'none',
+              width: r * 2, height: r * 2, borderRadius: '50%',
+              background: `radial-gradient(circle at 35% 30%, ${color}ff, ${color}cc)`,
+              opacity: anyActive ? 1 : 0.4,
+              border: `2px solid ${isSelected ? t.text1 : t.card}`,
+              boxShadow: isSelected
+                ? `0 0 0 3px ${t.text1}40, 0 2px 8px ${color}80`
+                : isHovered
+                  ? `0 0 0 4px ${color}30, 0 2px 6px ${color}70`
+                  : `0 1px 4px ${color}55`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 9, fontWeight: 700, color: t.card,
+              fontSize: 9.5, fontWeight: 800, color: t.card,
+              transition: 'width .15s ease, height .15s ease, box-shadow .15s ease',
             }}>
               {c.count > 1 ? c.count : ''}
             </div>
           </div>
         )
       })}
+    </div>
+  )
+}
+
+// Legend explaining marker colors — otherwise the status-coded dots (and the
+// blue "cluster" color) are uninterpretable at a glance.
+function BookingChartLegend({ t }) {
+  const items = [
+    ...Object.entries(STATUS_META).map(([, meta]) => meta),
+    { label: 'Multiple bookings', color: t.blue },
+  ]
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${t.border}` }}>
+      {items.map(it => (
+        <div key={it.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: it.color, boxShadow: `0 0 4px ${it.color}80`, display: 'inline-block' }} />
+          <span style={{ fontSize: 10, color: t.text3 }}>{it.label}</span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -3066,16 +3096,13 @@ function BookingRateChart({ t, card, date, bookings }) {
     return () => { cancelled = true }
   }, [date])
 
-  // Pick whichever source has the most coverage that day so the line still
-  // renders if the primary feed (Kalinga) happened to have a gap.
+  // Kalinga Kawad is the reference rate ops actually trades against — always
+  // used when it has any data at all that day. Only fall back to the next
+  // source in RATE_FIELDS order if Kalinga has zero rows (e.g. its feed was
+  // down all day), so the line still renders instead of going blank.
   const rateField = useMemo(() => {
     if (!rateRows?.length) return RATE_FIELDS[0]
-    let best = RATE_FIELDS[0], bestCount = -1
-    for (const f of RATE_FIELDS) {
-      const n = rateRows.filter(r => r[f.key] != null).length
-      if (n > bestCount) { best = f; bestCount = n }
-    }
-    return best
+    return RATE_FIELDS.find(f => rateRows.some(r => r[f.key] != null)) || RATE_FIELDS[0]
   }, [rateRows])
 
   // Full-day series (needed so a 9 AM hourly point can still look back at
@@ -3128,15 +3155,27 @@ function BookingRateChart({ t, card, date, bookings }) {
     return [Math.floor(min - pad), Math.ceil(max + pad)]
   }, [rateLine, clusters])
 
+  const avgRate = useMemo(
+    () => rateLine.length ? rateLine.reduce((s, r) => s + r.rate, 0) / rateLine.length : null,
+    [rateLine]
+  )
+
   const loading = rateRows == null
 
   return (
-    <div style={{ ...card, padding: '16px 18px', marginBottom: 14 }}>
+    <div style={{ ...card, padding: '16px 18px', marginBottom: 14, background: `linear-gradient(180deg, ${t.gold}08, transparent 40%), ${t.card}` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
-        <div style={{ fontSize: 12, color: t.text3, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 700 }}>
-          Intraday Gold Rate — Bookings Overlay
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 22, height: 22, borderRadius: 7, background: `linear-gradient(135deg, ${t.gold}, ${t.orange || t.gold})`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}>📈</span>
+          <div style={{ fontSize: 12, color: t.text2, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 700 }}>
+            Intraday Gold Rate — Bookings Overlay
+          </div>
         </div>
-        <div style={{ fontSize: 10.5, color: hovered ? t.gold : t.text4, fontWeight: hovered ? 600 : 400 }}>
+        <div style={{
+          fontSize: 10.5, padding: hovered ? '3px 10px' : 0, borderRadius: 20,
+          background: hovered ? `${t.gold}1c` : 'transparent',
+          color: hovered ? t.gold : t.text4, fontWeight: hovered ? 700 : 400, transition: 'all .15s',
+        }}>
           {hovered
             ? (hovered.count > 1
                 ? `${hovered.count} bookings around ${fmtDayMinutes(hovered.minutes)} — click to view`
@@ -3155,7 +3194,13 @@ function BookingRateChart({ t, card, date, bookings }) {
         <div ref={setWrapEl} style={{ position: 'relative', width: '100%', height: CHART_HEIGHT }}>
           <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
             <ComposedChart margin={CHART_MARGIN}>
-              <CartesianGrid stroke={t.border} strokeOpacity={0.4} vertical={false} />
+              <defs>
+                <linearGradient id="bookingRateFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={t.gold} stopOpacity={0.38} />
+                  <stop offset="95%" stopColor={t.gold} stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke={t.border} strokeOpacity={0.35} strokeDasharray="3 4" vertical={true} horizontal={true} />
               <XAxis
                 type="number" dataKey="minutes" domain={[DAY_START_MIN, DAY_END_MIN]}
                 ticks={HOUR_TICKS} height={X_AXIS_HEIGHT}
@@ -3164,20 +3209,29 @@ function BookingRateChart({ t, card, date, bookings }) {
               />
               <YAxis
                 type="number" dataKey="rate" domain={yDomain}
-                tick={{ fill: t.text4, fontSize: 9 }} axisLine={false} tickLine={false} width={Y_AXIS_WIDTH}
+                tick={{ fill: t.text3, fontSize: 9.5, fontWeight: 600 }} axisLine={false} tickLine={false} width={Y_AXIS_WIDTH}
                 tickFormatter={v => `₹${fmtNum(v)}`}
               />
+              {avgRate != null && (
+                <ReferenceLine y={avgRate} stroke={t.text4} strokeDasharray="4 3" strokeOpacity={0.6}
+                  label={{ value: `avg ₹${fmtNum(Math.round(avgRate))}`, position: 'insideTopLeft', fill: t.text4, fontSize: 9 }} />
+              )}
               {rateLine.length > 1 && (
-                <Line data={rateLine} dataKey="rate" type="monotone" stroke={t.gold} strokeWidth={1.75} dot={false} isAnimationActive={false} />
+                <Area
+                  data={rateLine} dataKey="rate" type="monotone"
+                  stroke={t.gold} strokeWidth={2.25} fill="url(#bookingRateFill)"
+                  dot={false} isAnimationActive={false}
+                />
               )}
             </ComposedChart>
           </ResponsiveContainer>
           {chartWidth > 0 && clusters.length > 0 && (
-            <BookingMarkersOverlay t={t} clusters={clusters} chartWidth={chartWidth} yDomain={yDomain} selected={selected} setSelected={setSelected} setHovered={setHovered} />
+            <BookingMarkersOverlay t={t} clusters={clusters} chartWidth={chartWidth} yDomain={yDomain} selected={selected} hovered={hovered} setSelected={setSelected} setHovered={setHovered} />
           )}
         </div>
       )}
 
+      {clusters.length > 0 && <BookingChartLegend t={t} />}
       {selected && <BookingDetailCard t={t} cluster={selected} onClose={() => setSelected(null)} />}
     </div>
   )
