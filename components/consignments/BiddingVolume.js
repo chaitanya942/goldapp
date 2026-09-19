@@ -2925,7 +2925,12 @@ function BookingMarkersLayer({ t, clusters, selected, hovered, setSelected, setH
         const r = Math.min(11, 5 + (c.count - 1) * 1.5)
         const isSelected = clusterKey(selected) === clusterKey(c)
         return (
-          <g key={clusterKey(c)} style={{ cursor: 'pointer' }}
+          // app/globals.css sets `svg.recharts-surface { pointer-events: none !important }`
+          // app-wide (so recharts' own axis-based Tooltip, driven by mouse
+          // position on the wrapper div, still works) — that also silently
+          // blocks real element hit-testing for anything rendered inside the
+          // SVG, including this overlay. Re-enable it just for these markers.
+          <g key={clusterKey(c)} style={{ cursor: 'pointer', pointerEvents: 'auto' }}
             onClick={() => setSelected(c)}
             onMouseEnter={() => setHovered(c)}
             onMouseLeave={() => setHovered(null)}>
