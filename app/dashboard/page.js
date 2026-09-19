@@ -58,6 +58,12 @@ const THEMES = {
   light: { bg: '#f5f0e8', card: '#faf7f2', text1: '#1a1208', text2: '#3a2a10', text3: '#6a5a3a', text4: '#9a8a6a', gold: '#9a7228', border: '#e0dace', red: '#c03030' },
 }
 
+// "Operations" sidebar group's tab ids (see components/Sidebar.js NAV_ITEMS)
+// — the stuck-bookings banner is booking/consignment-specific, so it should
+// only surface while ops is actually looking at one of these tabs, not on
+// every page including the Dashboard.
+const OPERATIONS_NAV_IDS = ['consignment-overview', 'consignment-data', 'consignment-bidding', 'consignment-report']
+
 function ComingSoon({ title }) {
   const { theme } = useApp()
   const t = THEMES[theme]
@@ -290,7 +296,7 @@ function DashboardShell() {
         <main style={{ flex: 1, overflowY: 'auto', overflowX: 'clip',
           paddingBottom: isMobile ? 'calc(64px + env(safe-area-inset-bottom) + 12px)' : 0,
           WebkitOverflowScrolling: 'touch', overscrollBehaviorY: 'contain' }}>
-          <StuckBookingsBanner />
+          {OPERATIONS_NAV_IDS.includes(activeNav) && <StuckBookingsBanner />}
           <AtRiskBookingsBanner />
           <div key={activeNav} className="page-enter">{renderPage()}</div>
         </main>
