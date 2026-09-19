@@ -33,7 +33,6 @@ import { istToday, istDaysAgo, addWorkingDaysSkipSunday, istStartOfDayIso, istEn
 import {
   ResponsiveContainer, ComposedChart, Line,
   XAxis, YAxis, CartesianGrid,
-  useXAxisScale, useYAxisScale,
 } from 'recharts'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -2902,50 +2901,91 @@ function clusterBookings(sorted) {
   }))
 }
 
-// Renders the booking markers as a plain child of <ComposedChart>, reading
-// recharts' OWN computed axis scales (useXAxisScale/useYAxisScale — the
-// documented recharts v3 pattern for custom overlays: "all charts are able
-// to render arbitrary elements anywhere, Customized is no longer needed").
-// Positions land exactly on the same scale the <Line> uses, and click/hover
-// are plain native SVG event handlers — not recharts' internal per-item
-// event dispatch (Scatter's onClick/onMouseEnter), which turned out not to
-// fire reliably when Scatter was mixed with a Line in the same chart.
-function BookingMarkersLayer({ t, clusters, selected, hovered, setSelected, setHovered }) {
-  const xScale = useXAxisScale()
-  const yScale = useYAxisScale()
-  if (!xScale || !yScale) return null
+// Three independent attempts to get click/hover working through recharts'
+// own rendering (custom Scatter shape, Scatter's onClick/onMouseEnter props,
+// then a hook-based scale overlay rendered as a chart child) all failed the
+// same way, and the actual cause turned out to be app/globals.css's
+// `svg.recharts-surface { pointer-events: none !important }` rule (added so
+// recharts' own axis-based Tooltip, driven by mouse position on the wrapper
+// div, keeps working) — it silently blocks real hit-testing for anything
+// else rendered inside ANY recharts SVG in this app. Re-enabling
+// pointer-events on the markers still didn't resolve it in testing, so
+// markers are now plain HTML <div>s absolutely positioned OVER the chart —
+// siblings of the SVG, not descendants of it — with ordinary onClick/
+// onMouseEnter. This is fully decoupled from recharts' rendering internals.
+//
+// Layout constants mirror what's passed to <ComposedChart>/<XAxis>/<YAxis>
+// below so the manual pixel math lines up with what recharts actually draws.
+const CHART_HEIGHT  = 220
+const CHART_MARGIN  = { top: 10, right: 16, bottom: 10, left: 4 }
+const Y_AXIS_WIDTH   = 50
+const X_AXIS_HEIGHT  = 34   // two-line tick: hour label + that hour's rate
+const DAY_START_MIN  = 9 * 60   // 9 AM
+const DAY_END_MIN    = 21 * 60  // 9 PM
+const HOUR_TICKS     = Array.from({ length: (DAY_END_MIN - DAY_START_MIN) / 60 + 1 }, (_, i) => DAY_START_MIN + i * 60)
+
+function makeScales(chartWidth, yDomain) {
+  const plotLeft   = CHART_MARGIN.left + Y_AXIS_WIDTH
+  const plotRight  = Math.max(plotLeft + 1, chartWidth - CHART_MARGIN.right)
+  const plotTop    = CHART_MARGIN.top
+  const plotBottom = CHART_HEIGHT - CHART_MARGIN.bottom - X_AXIS_HEIGHT
+  const [yMin, yMax] = yDomain
+  const yRange = (yMax - yMin) || 1
+  return {
+    x: (minutes) => plotLeft + ((minutes - DAY_START_MIN) / (DAY_END_MIN - DAY_START_MIN)) * (plotRight - plotLeft),
+    y: (rate) => plotTop + (1 - (rate - yMin) / yRange) * (plotBottom - plotTop),
+  }
+}
+
+// Two-line XAxis tick — the hour, and directly below it that hour's rate —
+// so the market rate's "reflection every hour" reads at a glance alongside
+// the line, without a separate interactive layer.
+function HourTick({ x, y, payload, t, hourlyPoints }) {
+  const hp = hourlyPoints.find(p => p.minutes === payload.value)
   return (
-    <g>
+    <g transform={`translate(${x},${y})`}>
+      <text dy={10} textAnchor="middle" fontSize={9} fill={t.text4}>{fmtDayMinutes(payload.value)}</text>
+      {hp && <text dy={22} textAnchor="middle" fontSize={8} fill={t.text3}>₹{fmtNum(Math.round(hp.rate))}</text>}
+    </g>
+  )
+}
+
+function BookingMarkersOverlay({ t, clusters, chartWidth, yDomain, selected, setSelected, setHovered }) {
+  const scale = makeScales(chartWidth, yDomain)
+  return (
+    <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
       {clusters.map((c) => {
-        const cx = xScale(c.minutes)
-        const cy = yScale(c.rate)
-        if (cx == null || cy == null || Number.isNaN(cx) || Number.isNaN(cy)) return null
+        const cx = scale.x(c.minutes)
+        const cy = scale.y(c.rate)
+        if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null
         const anyActive = c.members.some(m => m.status !== 'cancelled')
         const color = c.count > 1 ? t.blue : (STATUS_META[c.members[0].status]?.color || t.gold)
         const r = Math.min(11, 5 + (c.count - 1) * 1.5)
         const isSelected = clusterKey(selected) === clusterKey(c)
         return (
-          // app/globals.css sets `svg.recharts-surface { pointer-events: none !important }`
-          // app-wide (so recharts' own axis-based Tooltip, driven by mouse
-          // position on the wrapper div, still works) — that also silently
-          // blocks real element hit-testing for anything rendered inside the
-          // SVG, including this overlay. Re-enable it just for these markers.
-          <g key={clusterKey(c)} style={{ cursor: 'pointer', pointerEvents: 'auto' }}
+          <div
+            key={clusterKey(c)}
             onClick={() => setSelected(c)}
             onMouseEnter={() => setHovered(c)}
-            onMouseLeave={() => setHovered(null)}>
-            {/* Larger invisible hit area — real touch/click target, not just the visible dot */}
-            <circle cx={cx} cy={cy} r={r + 7} fill="transparent" />
-            <circle cx={cx} cy={cy} r={r} fill={color} fillOpacity={anyActive ? 0.85 : 0.35} stroke={isSelected ? t.text1 : t.card} strokeWidth={isSelected ? 2.5 : 1.5} />
-            {c.count > 1 && (
-              <text x={cx} y={cy} textAnchor="middle" dominantBaseline="central" fontSize={9} fontWeight={700} fill={t.card} style={{ pointerEvents: 'none' }}>
-                {c.count}
-              </text>
-            )}
-          </g>
+            onMouseLeave={() => setHovered(null)}
+            style={{
+              position: 'absolute', left: cx - r - 6, top: cy - r - 6, width: (r + 6) * 2, height: (r + 6) * 2,
+              pointerEvents: 'auto', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <div style={{
+              width: r * 2, height: r * 2, borderRadius: '50%', background: color,
+              opacity: anyActive ? 0.85 : 0.35, border: `1.5px solid ${isSelected ? t.text1 : t.card}`,
+              boxShadow: isSelected ? `0 0 0 2.5px ${t.text1}55` : 'none',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 9, fontWeight: 700, color: t.card,
+            }}>
+              {c.count > 1 ? c.count : ''}
+            </div>
+          </div>
         )
       })}
-    </g>
+    </div>
   )
 }
 
@@ -2994,6 +3034,18 @@ function BookingRateChart({ t, card, date, bookings }) {
   const [rateRows, setRateRows] = useState(null)   // null = loading
   const [selected, setSelected] = useState(null)   // clicked cluster
   const [hovered,  setHovered]  = useState(null)   // hovered cluster
+  const [chartWidth, setChartWidth] = useState(0)
+  const wrapRef = useRef(null)
+
+  useEffect(() => {
+    if (!wrapRef.current || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width
+      if (w) setChartWidth(w)
+    })
+    ro.observe(wrapRef.current)
+    return () => ro.disconnect()
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -3021,7 +3073,10 @@ function BookingRateChart({ t, card, date, bookings }) {
     return best
   }, [rateRows])
 
-  const rateLine = useMemo(() => {
+  // Full-day series (needed so a 9 AM hourly point can still look back at
+  // rows fetched just before 9 if the exact minute is missing), windowed to
+  // the 9 AM – 9 PM business-hours view for display.
+  const rateLineAll = useMemo(() => {
     if (!rateRows?.length) return []
     // gold_rates.*_sell_rate is quoted per 10 grams (standard bullion-market
     // convention — see the `sell > 100000` sanity floor in
@@ -3033,20 +3088,33 @@ function BookingRateChart({ t, card, date, bookings }) {
       .map(r => ({ minutes: toDayMinutes(r.fetched_at), rate: r[rateField.key] / 10 }))
   }, [rateRows, rateField])
 
+  const rateLine = useMemo(
+    () => rateLineAll.filter(r => r.minutes >= DAY_START_MIN && r.minutes <= DAY_END_MIN),
+    [rateLineAll]
+  )
+
+  // The market rate's "reflection every hour" — one reference point per
+  // hour from 9 AM to 9 PM, shown under the matching XAxis tick.
+  const hourlyPoints = useMemo(() => (
+    HOUR_TICKS
+      .map(minutes => ({ minutes, rate: nearestRate(rateLineAll, minutes) }))
+      .filter(p => p.rate != null)
+  ), [rateLineAll])
+
   const clusters = useMemo(() => {
     const withTime = (bookings || [])
       .filter(b => b.created_at)
       .map(b => ({ ...b, minutes: toDayMinutes(b.created_at) }))
+      .filter(b => b.minutes >= DAY_START_MIN && b.minutes <= DAY_END_MIN)
       .sort((a, b) => a.minutes - b.minutes)
-      .map(b => ({ ...b, refRate: nearestRate(rateLine, b.minutes), refRateLabel: rateField.label }))
+      .map(b => ({ ...b, refRate: nearestRate(rateLineAll, b.minutes), refRateLabel: rateField.label }))
     return clusterBookings(withTime)
-  }, [bookings, rateLine, rateField])
+  }, [bookings, rateLineAll, rateField])
 
-  // Explicit Y domain covering BOTH the rate line and the booking markers —
-  // the markers are now positioned via a hook-based overlay (BookingMarkersLayer)
-  // rather than a <Scatter> series bound to the axis, so YAxis has no series
-  // of its own to auto-expand the domain to include booking rates that land
-  // outside the market line's range for the day.
+  // Explicit Y domain covering both the rate line and the booking markers —
+  // markers are a plain HTML overlay, not a chart series, so YAxis has
+  // nothing of its own to auto-expand to booking rates outside the line's
+  // range for the day.
   const yDomain = useMemo(() => {
     const vals = [...rateLine.map(r => r.rate), ...clusters.map(c => c.rate)]
     if (!vals.length) return [0, 1]
@@ -3069,38 +3137,40 @@ function BookingRateChart({ t, card, date, bookings }) {
                 ? `${hovered.count} bookings around ${fmtDayMinutes(hovered.minutes)} — click to view`
                 : `${fmtDayMinutes(hovered.minutes)} · ${hovered.members[0].party || 'Booking'} · ${fmt(hovered.members[0].weight)}g @ ₹${fmtNum(hovered.members[0].rate)}/g — click for full detail`)
             : rateLine.length > 0
-              ? `${rateField.label} sell rate, ₹/g · click a marker for full detail`
+              ? `${rateField.label} sell rate, ₹/g, 9 AM–9 PM · click a marker for full detail`
               : 'Market rate data unavailable for this day'}
         </div>
       </div>
 
       {loading ? (
-        <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>Loading rate history…</div>
+        <div style={{ height: CHART_HEIGHT, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>Loading rate history…</div>
       ) : clusters.length === 0 && rateLine.length === 0 ? (
-        <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>No bookings or market data for this day</div>
+        <div style={{ height: CHART_HEIGHT, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>No bookings or market data for this day (9 AM–9 PM)</div>
       ) : (
-        <ResponsiveContainer width="100%" height={220}>
-          <ComposedChart margin={{ top: 10, right: 16, bottom: 10, left: 4 }}>
-            <CartesianGrid stroke={t.border} strokeOpacity={0.4} vertical={false} />
-            <XAxis
-              type="number" dataKey="minutes" domain={[0, 1440]}
-              ticks={[0, 120, 240, 360, 480, 600, 720, 840, 960, 1080, 1200, 1320, 1440]}
-              tickFormatter={fmtDayMinutes}
-              tick={{ fill: t.text4, fontSize: 9 }} axisLine={{ stroke: t.border }} tickLine={false}
-            />
-            <YAxis
-              type="number" dataKey="rate" domain={yDomain}
-              tick={{ fill: t.text4, fontSize: 9 }} axisLine={false} tickLine={false} width={50}
-              tickFormatter={v => `₹${fmtNum(v)}`}
-            />
-            {rateLine.length > 1 && (
-              <Line data={rateLine} dataKey="rate" type="monotone" stroke={t.gold} strokeWidth={1.75} dot={false} isAnimationActive={false} />
-            )}
-            {clusters.length > 0 && (
-              <BookingMarkersLayer t={t} clusters={clusters} selected={selected} hovered={hovered} setSelected={setSelected} setHovered={setHovered} />
-            )}
-          </ComposedChart>
-        </ResponsiveContainer>
+        <div ref={wrapRef} style={{ position: 'relative', width: '100%', height: CHART_HEIGHT }}>
+          <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+            <ComposedChart margin={CHART_MARGIN}>
+              <CartesianGrid stroke={t.border} strokeOpacity={0.4} vertical={false} />
+              <XAxis
+                type="number" dataKey="minutes" domain={[DAY_START_MIN, DAY_END_MIN]}
+                ticks={HOUR_TICKS} height={X_AXIS_HEIGHT}
+                tick={(props) => <HourTick {...props} t={t} hourlyPoints={hourlyPoints} />}
+                axisLine={{ stroke: t.border }} tickLine={false}
+              />
+              <YAxis
+                type="number" dataKey="rate" domain={yDomain}
+                tick={{ fill: t.text4, fontSize: 9 }} axisLine={false} tickLine={false} width={Y_AXIS_WIDTH}
+                tickFormatter={v => `₹${fmtNum(v)}`}
+              />
+              {rateLine.length > 1 && (
+                <Line data={rateLine} dataKey="rate" type="monotone" stroke={t.gold} strokeWidth={1.75} dot={false} isAnimationActive={false} />
+              )}
+            </ComposedChart>
+          </ResponsiveContainer>
+          {chartWidth > 0 && clusters.length > 0 && (
+            <BookingMarkersOverlay t={t} clusters={clusters} chartWidth={chartWidth} yDomain={yDomain} selected={selected} setSelected={setSelected} setHovered={setHovered} />
+          )}
+        </div>
       )}
 
       {selected && <BookingDetailCard t={t} cluster={selected} onClose={() => setSelected(null)} />}
