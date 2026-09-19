@@ -33,6 +33,7 @@ function getRange(key) {
   if (key === 'mtd')       return { from: `${y}-${String(m+1).padStart(2,'0')}-01`, to: today, label: 'Month to Date' }
   if (key === 'prev')      { const pm=m===0?11:m-1, pY=m===0?y-1:y, last=new Date(pY,pm+1,0).getDate(); return { from:`${pY}-${String(pm+1).padStart(2,'0')}-01`, to:`${pY}-${String(pm+1).padStart(2,'0')}-${String(last).padStart(2,'0')}`, label:'Previous Month' } }
   if (key === 'ytd')       { const fy=m>=3?`${y}-04-01`:`${y-1}-04-01`; return { from:fy, to:today, label:'Year to Date (FY)' } }
+  if (key === 'last_week') { const { from, to } = istLastWeekRange(); return { from, to, label: 'Last Week' } }
   return { from: null, to: null, label: 'All Time' }
 }
 
@@ -748,8 +749,8 @@ function StatRow({ label, value, sub, color, t, bar, barMax, delay=0 }) {
 
 const PERIODS = [
   { key:'today', label:'Today' }, { key:'yesterday', label:'Yesterday' },
-  { key:'week', label:'This Week' }, { key:'mtd', label:'MTD' },
-  { key:'prev', label:'Prev Month' }, { key:'ytd', label:'YTD' },
+  { key:'week', label:'This Week' }, { key:'last_week', label:'Last Week' },
+  { key:'mtd', label:'MTD' }, { key:'prev', label:'Prev Month' }, { key:'ytd', label:'YTD' },
 ]
 
 const EmptyPanel = ({ t }) => (
@@ -1231,7 +1232,12 @@ export default function DashboardHome() {
     }
     const finishEmpty = () => { if (!silent) { setKpis(null); setPrevKpis(null); setLoading(false) } }
     const { from, to } = getRange(period)
-    const { from: prevFrom, to: prevTo } = getPrevRange(from, to)
+    // "This Week" compares against last week's calendar range (not the
+    // generic rolling N-day-back window) — a partial week (Mon..today)
+    // vs. an equal-length slice of the previous week reads as a much
+    // bigger swing than it is; "this week vs last week" is the intuitive
+    // comparison here, same as the Consignment Overview's Last Week filter.
+    const { from: prevFrom, to: prevTo } = period === 'week' ? istLastWeekRange() : getPrevRange(from, to)
 
     // Region scoping: resolve the user's allowed branches BY DIRECTLY QUERYING branches.
     // Don't rely on branchMeta state — it may not have loaded yet, or may be holding

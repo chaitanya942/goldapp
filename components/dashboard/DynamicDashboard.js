@@ -11,7 +11,7 @@ import {
 } from 'recharts'
 
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
-import { istNow, istStr, istDaysAgo as daysBack } from '../../lib/dateIst'
+import { istNow, istStr, istDaysAgo as daysBack, istLastWeekRange } from '../../lib/dateIst'
 import { useDashboardAuditLog } from '../../lib/useDashboardAuditLog'
 import ConsignmentOverviewWidget from './ConsignmentOverviewWidget'
 import TodaysBookingsWidget from './TodaysBookingsWidget'
@@ -38,13 +38,14 @@ function getRange(key) {
   if (key === 'mtd')       return { from:`${y}-${String(m+1).padStart(2,'0')}-01`, to:today, label:'Month to Date' }
   if (key === 'prev')      { const pm=m===0?11:m-1, pY=m===0?y-1:y, last=new Date(pY,pm+1,0).getDate(); return { from:`${pY}-${String(pm+1).padStart(2,'0')}-01`, to:`${pY}-${String(pm+1).padStart(2,'0')}-${String(last).padStart(2,'0')}`, label:'Previous Month' } }
   if (key === 'ytd')       { const fy=m>=3?`${y}-04-01`:`${y-1}-04-01`; return { from:fy, to:today, label:'Year to Date (FY)' } }
+  if (key === 'last_week') { const { from, to } = istLastWeekRange(); return { from, to, label: 'Last Week' } }
   return { from:null, to:null, label:'All Time' }
 }
 
 const PERIODS = [
   { key:'today', label:'Today' }, { key:'yesterday', label:'Yesterday' },
-  { key:'week', label:'This Week' }, { key:'mtd', label:'MTD' },
-  { key:'prev', label:'Prev Month' }, { key:'ytd', label:'YTD' },
+  { key:'week', label:'This Week' }, { key:'last_week', label:'Last Week' },
+  { key:'mtd', label:'MTD' }, { key:'prev', label:'Prev Month' }, { key:'ytd', label:'YTD' },
 ]
 const COLOR_PALETTE = ['#c9a84c','#3aaa6a','#3a8fbf','#8c5ac8','#c9981f','#e05555']
 
@@ -327,7 +328,12 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   const fetchPeriod = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true)
     const { from, to } = getRange(period)
-    const { from: prevFrom, to: prevTo } = getPrevRange(from, to)
+    // "This Week" compares against last week's calendar range, not the
+    // generic rolling N-day-back window — a partial week (Mon..today) vs.
+    // an equal-length slice of the previous week reads as a much bigger
+    // swing than it is; "this week vs last week" is the intuitive
+    // comparison, same as the Consignment Overview's Last Week filter.
+    const { from: prevFrom, to: prevTo } = period === 'week' ? istLastWeekRange() : getPrevRange(from, to)
 
     let p_branch = null
     let p_region_branches = null
