@@ -817,23 +817,39 @@ export async function GET(req) {
     const inflightBranchNames = (branchRows || [])
       .filter(b => b.model_type !== 'bangalore' && b.region !== 'Kerala')
       .map(b => b.name)
+    // Paginate by fetching page 1 WITH an exact count, then firing every
+    // remaining page concurrently instead of one round trip at a time. In
+    // the common case (<1000 rows) this is exactly one request, same as
+    // before; on a genuinely busy day (>1000 in-transit bills, the case
+    // this pagination exists for) it turns N sequential round trips into
+    // 1 + all-the-rest-in-parallel.
+    const inflightBillsQuery = (from, to) => supabase
+      .from('purchases')
+      .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, dispatched_at, stock_status, crm_status', { count: 'exact' })
+      .in('branch_name', inflightBranchNames)
+      .eq('stock_status', 'in_consignment')
+      .eq('is_deleted', false)
+      .not('dispatched_at', 'is', null)
+      .is('booking_id', null)
+      .range(from, to)
     let inflightBills = []
     if (inflightBranchNames.length) {
       const CHUNK = 1000
-      for (let from = 0; ; from += CHUNK) {
-        const { data: ib, error: ibErr } = await supabase
-          .from('purchases')
-          .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, dispatched_at, stock_status, crm_status')
-          .in('branch_name', inflightBranchNames)
-          .eq('stock_status', 'in_consignment')
-          .eq('is_deleted', false)
-          .not('dispatched_at', 'is', null)
-          .is('booking_id', null)
-          .range(from, from + CHUNK - 1)
-        if (ibErr) return Response.json({ error: ibErr.message }, { status: 500 })
-        if (!ib || !ib.length) break
-        inflightBills.push(...ib)
-        if (ib.length < CHUNK) break
+      const { data: firstPage, count, error: ibErr } = await inflightBillsQuery(0, CHUNK - 1)
+      if (ibErr) return Response.json({ error: ibErr.message }, { status: 500 })
+      inflightBills = firstPage || []
+      const totalPages = Math.ceil((count ?? inflightBills.length) / CHUNK)
+      if (totalPages > 1) {
+        const restPages = await Promise.all(
+          Array.from({ length: totalPages - 1 }, (_, i) => {
+            const from = (i + 1) * CHUNK
+            return inflightBillsQuery(from, from + CHUNK - 1)
+          })
+        )
+        for (const page of restPages) {
+          if (page.error) return Response.json({ error: page.error.message }, { status: 500 })
+          inflightBills.push(...(page.data || []))
+        }
       }
     }
     _bvMark('inflight_ms', inflightBills?.length)
@@ -1277,28 +1293,42 @@ export async function GET(req) {
     if (allBookableBranchNames.length) {
       // Paginate — without a range, this caps at Supabase max_rows (1000) and
       // would silently undercount booked stock in the transit/pre-EOD tallies
-      // once enough bills are booked.
+      // once enough bills are booked. Fetch page 1 WITH an exact count, then
+      // fire every remaining page concurrently instead of one at a time —
+      // same one-request cost as before when under 1000 rows, far fewer
+      // sequential round trips on a busy day.
       const CHUNK = 1000
-      let from = 0
-      while (true) {
-        const { data: bw, error: bwErr } = await supabase
-          .from('purchases')
-          .select('id, application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, dispatched_at, crm_status, booked_at')
-          .in('branch_name', allBookableBranchNames)
-          .eq('crm_status', 'approved')
-          .eq('is_deleted', false)
-          .not('booking_id', 'is', null)
-          // Only in_consignment + at_branch are ever bucketed below (bookedInflight
-          // / bookedPreEod). Excluding at_ho keeps this from paginating the entire
-          // booked-and-received backlog (e.g. the 68k pre-GoldApp historical-close
-          // bills) on every load — that was making bidding_volume crawl.
-          .in('stock_status', ['in_consignment', 'at_branch'])
-          .range(from, from + CHUNK - 1)
-        if (bwErr || !bw?.length) break
-        bookedWindowBills.push(...bw.map(b => ({ ...b, _owner: b.current_branch || b.branch_name })))
-        _bwqPages++   // diag: count pages fetched
-        if (bw.length < CHUNK) break
-        from += CHUNK
+      const bookedWindowQuery = (from, to) => supabase
+        .from('purchases')
+        .select('id, application_id, customer_name, branch_name, current_branch, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, dispatched_at, crm_status, booked_at', { count: 'exact' })
+        .in('branch_name', allBookableBranchNames)
+        .eq('crm_status', 'approved')
+        .eq('is_deleted', false)
+        .not('booking_id', 'is', null)
+        // Only in_consignment + at_branch are ever bucketed below (bookedInflight
+        // / bookedPreEod). Excluding at_ho keeps this from paginating the entire
+        // booked-and-received backlog (e.g. the 68k pre-GoldApp historical-close
+        // bills) on every load — that was making bidding_volume crawl.
+        .in('stock_status', ['in_consignment', 'at_branch'])
+        .range(from, to)
+      const { data: firstPage, count, error: bwErr } = await bookedWindowQuery(0, CHUNK - 1)
+      if (!bwErr && firstPage?.length) {
+        bookedWindowBills.push(...firstPage.map(b => ({ ...b, _owner: b.current_branch || b.branch_name })))
+        _bwqPages = 1
+        const totalPages = Math.ceil((count ?? firstPage.length) / CHUNK)
+        if (totalPages > 1) {
+          const restPages = await Promise.all(
+            Array.from({ length: totalPages - 1 }, (_, i) => {
+              const from = (i + 1) * CHUNK
+              return bookedWindowQuery(from, from + CHUNK - 1)
+            })
+          )
+          for (const page of restPages) {
+            if (page.error || !page.data?.length) continue
+            bookedWindowBills.push(...page.data.map(b => ({ ...b, _owner: b.current_branch || b.branch_name })))
+            _bwqPages++
+          }
+        }
       }
     }
     _bvTimings.booked_window_query_ms = Date.now() - _bwqStart

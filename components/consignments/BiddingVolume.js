@@ -368,31 +368,48 @@ export default function BiddingVolume() {
     else window.localStorage.setItem('bidding.gainOverrideGrams', String(gainOverrideGrams))
   }, [gainOverrideGrams])
 
+  // Phase-wise loading: the four requests already fire together, but the
+  // OLD code only ever called setSupply/setBookingsResp/setCmp* after
+  // Promise.all-ing every one of them — so the page's own blocking-spinner
+  // check (`loading && !supply`, below) stayed true until the SLOWEST
+  // request finished, even though it only actually needs `supply`. Each
+  // fetch below now applies its own state the moment IT resolves, so the
+  // main Bidding tab (which only needs `supply`) can render as soon as
+  // action=bidding_volume is back, without waiting on the Bookings-tab
+  // data or the today-vs-yesterday comparison band at all.
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
     setError(null)
-    try {
-      const [supR, bkR, cmpTodayR, cmpYestR] = await Promise.all([
-        authedFetch(`/api/consignments?action=bidding_volume&date=${arrivalDate}${bangaloreDateOverride ? `&bangalore_date=${bangaloreDateOverride}` : ''}`),
-        // Bookings use bidding_date (created_at IST) — so the operator sees
-        // bookings on the day they were placed, not the arrival day.
-        authedFetch(`/api/consignments?action=bidding_bookings&bidding_date=${bookingsDate}`),
-        // Today-vs-yesterday comparison band — always the real calendar day,
-        // independent of whatever bidding day ops has navigated bookingsDate to.
-        authedFetch(`/api/consignments?action=bidding_bookings&bidding_date=${istToday()}`),
-        authedFetch(`/api/consignments?action=bidding_bookings&bidding_date=${istDaysAgo(1)}`),
-      ])
-      const supJ = await supR.json()
-      const bkJ  = await bkR.json()
-      if (!supR.ok || supJ.error) throw new Error(supJ.error || `Supply HTTP ${supR.status}`)
-      if (!bkR.ok  || bkJ.error)  throw new Error(bkJ.error  || `Bookings HTTP ${bkR.status}`)
-      setSupply(supJ.data)
-      setBookingsResp(bkJ.data)
-      // Comparison band is best-effort — a hiccup here shouldn't block the
-      // rest of the page from loading.
-      const [cmpTodayJ, cmpYestJ] = await Promise.all([cmpTodayR.json().catch(() => null), cmpYestR.json().catch(() => null)])
+
+    const supplyPromise = authedFetch(`/api/consignments?action=bidding_volume&date=${arrivalDate}${bangaloreDateOverride ? `&bangalore_date=${bangaloreDateOverride}` : ''}`)
+      .then(async (r) => {
+        const j = await r.json()
+        if (!r.ok || j.error) throw new Error(j.error || `Supply HTTP ${r.status}`)
+        setSupply(j.data)
+      })
+
+    // Bookings use bidding_date (created_at IST) — so the operator sees
+    // bookings on the day they were placed, not the arrival day.
+    const bookingsPromise = authedFetch(`/api/consignments?action=bidding_bookings&bidding_date=${bookingsDate}`)
+      .then(async (r) => {
+        const j = await r.json()
+        if (!r.ok || j.error) throw new Error(j.error || `Bookings HTTP ${r.status}`)
+        setBookingsResp(j.data)
+      })
+
+    // Today-vs-yesterday comparison band — always the real calendar day,
+    // independent of whatever bidding day ops has navigated bookingsDate
+    // to. Best-effort — a hiccup here shouldn't block the rest of the page.
+    const cmpPromise = Promise.all([
+      authedFetch(`/api/consignments?action=bidding_bookings&bidding_date=${istToday()}`).then(r => r.json()).catch(() => null),
+      authedFetch(`/api/consignments?action=bidding_bookings&bidding_date=${istDaysAgo(1)}`).then(r => r.json()).catch(() => null),
+    ]).then(([cmpTodayJ, cmpYestJ]) => {
       setCmpToday((cmpTodayJ?.data?.bookings || []).filter(b => b.status !== 'cancelled'))
       setCmpYesterday((cmpYestJ?.data?.bookings || []).filter(b => b.status !== 'cancelled'))
+    })
+
+    try {
+      await Promise.all([supplyPromise, bookingsPromise, cmpPromise])
     } catch (e) {
       setError(String(e?.message || e))
     } finally {
