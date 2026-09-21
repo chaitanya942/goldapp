@@ -6146,7 +6146,7 @@ export async function POST(req) {
     //    the same set the bid desk sums (and attach_selected_to_pipeline uses).
     const { data: bookings, error: qErr } = await supabase
       .from('cal_quotas')
-      .select('id, weight, gain_rate, pending_g, additional_gain_g, is_kl, status, pipeline_closed_at, created_at')
+      .select('id, date, weight, gain_rate, pending_g, additional_gain_g, is_kl, status, pipeline_closed_at, pipeline_arrival_date, created_at')
       .eq('is_kl', klFlag)
       .neq('status', 'cancelled')
       .is('pipeline_closed_at', null)
@@ -6154,14 +6154,28 @@ export async function POST(req) {
       .lt('created_at',  istEndOfDayIso(bidding_date))
       .order('created_at', { ascending: true })
     if (qErr) return Response.json({ error: qErr.message }, { status: 500 })
-    const bkIds = (bookings || []).map(b => b.id)
+    // Same "settled" rule the display uses (action=bidding_bookings, derived
+    // gain/pipeline model): once a booking's ARRIVAL date has passed, its
+    // shortfall is already realized as gain, not still-open pipeline — .is
+    // ('pipeline_closed_at', null) above only excludes the OTHER settle path
+    // (ops manually closing it). Without this, an old booking that the
+    // Bookings tab already shows as "settled" (pipeline: 0, folded into
+    // gain) still looked fully open here, so a new bill's split could try
+    // to close a shortfall that's already been written off — consuming the
+    // whole selection against gold that was never actually still owed.
+    const todayIstForSettle = istToday()
+    const liveBookings = (bookings || []).filter(b => {
+      const settleDate = b.pipeline_arrival_date || b.date
+      return !(settleDate && String(settleDate) < todayIstForSettle)
+    })
+    const bkIds = liveBookings.map(b => b.id)
     const attachedByBk = {}
     for (let i = 0; i < bkIds.length; i += 100) {
       const { data: rws } = await supabase.from('purchases').select('booking_id, net_weight').in('booking_id', bkIds.slice(i, i + 100))
       for (const r of rws || []) attachedByBk[r.booking_id] = (attachedByBk[r.booking_id] || 0) + Number(r.net_weight || 0)
     }
     const alloc0 = await allocDeltaByBooking(supabase, bkIds)
-    const open = (bookings || []).map(b => {
+    const open = liveBookings.map(b => {
       const bRate    = b.gain_rate != null ? Number(b.gain_rate) : (b.is_kl ? 0 : 0.035)
       const attached = (attachedByBk[b.id] || 0) + (alloc0[b.id] || 0)
       const residual = Math.max(0, Number(b.weight || 0) - (attached + Number(b.pending_g || 0)) * (1 + bRate))
@@ -6175,6 +6189,7 @@ export async function POST(req) {
     // immediately visible instead of just "it didn't work."
     const debugPipeline = {
       candidate_bookings_in_window: (bookings || []).length,
+      excluded_as_settled_count:    (bookings || []).length - liveBookings.length,
       open_bookings_count:          open.length,
       open_residual_total_g:        Number(open.reduce((s, b) => s + b.residual, 0).toFixed(3)),
       bill_net_g:                   Number(billNet.toFixed(3)),
