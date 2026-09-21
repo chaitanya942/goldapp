@@ -3478,7 +3478,7 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
               <th style={{ ...th, textAlign: 'right' }} title="Total weight committed to the bidder">= Booked Wt</th>
               <th style={{ ...th, textAlign: 'right', color: t.text4 }}>× Rate</th>
               <th style={{ ...th, textAlign: 'right' }}>= Value</th>
-              <th style={{ ...th, textAlign: 'center', width: 50 }} title="Clear a booking — cancels it and unbooks the attached bills"></th>
+              <th style={{ ...th, textAlign: 'center', width: 78 }} title="Clear a booking — cancels it and unbooks the attached bills"></th>
             </tr>
           </thead>
           <tbody>
@@ -3726,14 +3726,14 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
                     {isCancelled ? (
                       onRebook ? (
                         <button type="button" onClick={() => onRebook(b)}
-                          title={`Rebook ${b.party} — prefills party/rate on a new booking; you'll reselect bills`}
+                          title={`Rebook ${b.party} — sends this booking's branch-level sourcing back to Bidding`}
                           style={{
-                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                            width: 24, height: 24, borderRadius: 6, background: 'transparent',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                            padding: '4px 10px', borderRadius: 6, background: 'transparent',
                             border: `1px solid ${t.gold}55`, color: t.gold, lineHeight: 1,
-                            fontSize: 13, fontWeight: 800, cursor: 'pointer',
+                            fontSize: 11, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap',
                           }}>
-                          ↻
+                          ↻ Rebook
                         </button>
                       ) : <span style={{ color: t.text4 }}>—</span>
                     ) : (

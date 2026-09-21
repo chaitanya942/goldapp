@@ -1996,7 +1996,8 @@ export async function GET(req) {
                         pipeline_attached_at, gain_realized_g,
                         bills_net_weight_g, gain_applied_g, pending_g,
                         additional_gain_g, pipeline_original_g,
-                        gain_audited_at, gain_rate, pipeline_closed_at`
+                        gain_audited_at, gain_rate, pipeline_closed_at,
+                        cancelled_branch_breakdown`
     const baseSelect = `id, date, party, buyer_phone, weight, rate, is_kl, purity, notes,
                         status, created_at, created_by,
                         confirmed_at, confirmed_by, fulfilled_at, fulfilled_by,
@@ -5455,6 +5456,27 @@ export async function POST(req) {
     // available for re-booking. Safe to no-op when nothing was linked.
     if (status === 'cancelled') {
       try {
+        // Snapshot the branch-level sourcing BEFORE releasing the bills below
+        // destroys the purchases.booking_id link — this is the only way a
+        // later "Rebook" can resegment the same branch composition back into
+        // the bidding view, since nothing else records booking->bill history.
+        const { data: attachedBills } = await supabase
+          .from('purchases')
+          .select('branch_name, current_branch, net_weight')
+          .eq('booking_id', id)
+        if (attachedBills?.length) {
+          const byBranch = {}
+          for (const p of attachedBills) {
+            const owner = p.current_branch || p.branch_name
+            if (!owner) continue
+            byBranch[owner] = (byBranch[owner] || 0) + (Number(p.net_weight) || 0)
+          }
+          const breakdown = Object.entries(byBranch).map(([branch, net_weight_g]) => ({ branch, net_weight_g }))
+          if (breakdown.length) {
+            await supabase.from('cal_quotas').update({ cancelled_branch_breakdown: breakdown }).eq('id', id)
+          }
+        }
+
         await supabase
           .from('purchases')
           .update({ booking_id: null, booked_at: null })
