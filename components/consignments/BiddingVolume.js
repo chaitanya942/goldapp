@@ -2939,6 +2939,19 @@ function fmtDayMinutes(m) {
   return mm === 0 ? `${h12} ${ampm}` : `${h12}:${String(mm).padStart(2, '0')} ${ampm}`
 }
 
+// Centered moving average — smooths minute-to-minute market-rate noise for
+// display so the line reads as a clean trend instead of a jagged zigzag.
+// Purely cosmetic: callers needing the exact quoted rate at a moment (booking
+// reference rates, hourly labels) read from the unsmoothed series instead.
+function smoothSeries(series, window = 5) {
+  if (series.length <= window) return series
+  const half = Math.floor(window / 2)
+  return series.map((pt, i) => {
+    const slice = series.slice(Math.max(0, i - half), Math.min(series.length, i + half + 1))
+    return { ...pt, rate: slice.reduce((s, p) => s + p.rate, 0) / slice.length }
+  })
+}
+
 // Nearest-by-time lookup — "gold market/reference rate at that time" for a
 // booking that didn't happen to land exactly on a gold_rates fetch tick.
 function nearestRate(series, minutes) {
@@ -3033,8 +3046,10 @@ function BookingMarkersOverlay({ t, clusters, chartWidth, yDomain, selected, hov
         const key = clusterKey(c)
         const isSelected = clusterKey(selected) === key
         const isHovered  = clusterKey(hovered) === key
-        const baseR = Math.min(11, 6 + (c.count - 1) * 1.5)
-        const r = baseR * (isHovered || isSelected ? 1.25 : 1)
+        // Bigger, higher-contrast dots — the earlier size read as too small
+        // and low-contrast against a busy gradient-filled line.
+        const baseR = Math.min(13, 7 + (c.count - 1) * 1.5)
+        const r = baseR * (isHovered || isSelected ? 1.3 : 1)
         return (
           <div
             key={key}
@@ -3048,16 +3063,22 @@ function BookingMarkersOverlay({ t, clusters, chartWidth, yDomain, selected, hov
           >
             <div style={{
               width: r * 2, height: r * 2, borderRadius: '50%',
-              background: `radial-gradient(circle at 35% 30%, ${color}ff, ${color}cc)`,
-              opacity: anyActive ? 1 : 0.4,
-              border: `2px solid ${isSelected ? t.text1 : t.card}`,
+              // Cancelled-only clusters render hollow (outline only) instead
+              // of just faded — reads unambiguously as "didn't happen"
+              // rather than looking like a rendering glitch.
+              background: anyActive
+                ? `radial-gradient(circle at 35% 30%, ${color}ff, ${color}cc)`
+                : 'transparent',
+              border: anyActive
+                ? `2.5px solid ${isSelected ? t.text1 : t.card}`
+                : `2px dashed ${color}90`,
               boxShadow: isSelected
-                ? `0 0 0 3px ${t.text1}40, 0 2px 8px ${color}80`
+                ? `0 0 0 4px ${t.text1}45, 0 3px 10px ${color}90, 0 0 12px ${color}60`
                 : isHovered
-                  ? `0 0 0 4px ${color}30, 0 2px 6px ${color}70`
-                  : `0 1px 4px ${color}55`,
+                  ? `0 0 0 5px ${color}35, 0 3px 9px ${color}80, 0 0 10px ${color}50`
+                  : `0 2px 6px rgba(0,0,0,.35), 0 0 5px ${color}60`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 9.5, fontWeight: 800, color: t.card,
+              fontSize: 10, fontWeight: 800, color: anyActive ? t.card : color,
               transition: 'width .15s ease, height .15s ease, box-shadow .15s ease',
             }}>
               {c.count > 1 ? c.count : ''}
@@ -3194,10 +3215,15 @@ function BookingRateChart({ t, card, date, bookings }) {
       .map(r => ({ minutes: toDayMinutes(r.fetched_at), rate: r[rateField.key] / 10 }))
   }, [rateRows, rateField])
 
-  const rateLine = useMemo(
-    () => rateLineAll.filter(r => r.minutes >= DAY_START_MIN && r.minutes <= DAY_END_MIN),
-    [rateLineAll]
-  )
+  const rateLine = useMemo(() => {
+    const windowed = rateLineAll.filter(r => r.minutes >= DAY_START_MIN && r.minutes <= DAY_END_MIN)
+    // Light smoothing purely for the drawn line — real minute-to-minute
+    // market ticks are noisy enough that a raw line reads as jagged/hard to
+    // follow. nearestRate() lookups for a booking's reference rate and the
+    // hourly tick labels both read from rateLineAll (unsmoothed), so this
+    // only affects what's drawn, never a number shown anywhere.
+    return smoothSeries(windowed, 5)
+  }, [rateLineAll])
 
   // The market rate's "reflection every hour" — one reference point per
   // hour from 9 AM to 9 PM, shown under the matching XAxis tick.
