@@ -765,37 +765,41 @@ export async function GET(req) {
     const BANG_BILL_COLS = 'id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, dispatched_at, crm_status, audit_hold, audit_consumed_at, released_at'
     let bangBills = []
     if (bangaloreBranchNames.length) {
-      const { data: bb, error: bbErr } = await supabase
-        .from('purchases')
-        .select(BANG_BILL_COLS)
-        .in('branch_name', bangaloreBranchNames)
-        .gte('purchase_date', bangalorePurchaseDate)
-        .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
-        .eq('crm_status', 'approved')
-        .eq('is_deleted', false)
-        .is('booking_id', null)
-      if (bbErr) return Response.json({ error: bbErr.message }, { status: 500 })
+      // The two queries below are independent of each other — neither reads
+      // the other's result, only the dedup after both resolve does — so
+      // they run concurrently instead of one after another.
+      const [bbRes, rbRes] = await Promise.all([
+        supabase
+          .from('purchases')
+          .select(BANG_BILL_COLS)
+          .in('branch_name', bangaloreBranchNames)
+          .gte('purchase_date', bangalorePurchaseDate)
+          .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
+          .eq('crm_status', 'approved')
+          .eq('is_deleted', false)
+          .is('booking_id', null),
+        // A booking cancellation should make its bills immediately rebookable
+        // TODAY, not stuck under whatever historical purchase_date they happen
+        // to carry (or excluded for having already been gain-audited before
+        // release). released_at is stamped at cancellation time — anything
+        // released today surfaces here regardless of the other query's filters.
+        supabase
+          .from('purchases')
+          .select(BANG_BILL_COLS)
+          .in('branch_name', bangaloreBranchNames)
+          .gte('released_at', istStartOfDayIso(today))
+          .lt('released_at',  istEndOfDayIso(today))
+          .eq('crm_status', 'approved')
+          .eq('is_deleted', false)
+          .is('booking_id', null),
+      ])
+      if (bbRes.error) return Response.json({ error: bbRes.error.message }, { status: 500 })
+      if (rbRes.error) return Response.json({ error: rbRes.error.message }, { status: 500 })
       // Don't surface bills the EOD audit already consumed — they're now
       // labelled gain and shouldn't show as bookable.
-      bangBills = (bb || []).filter(b => !b.audit_consumed_at)
-
-      // A booking cancellation should make its bills immediately rebookable
-      // TODAY, not stuck under whatever historical purchase_date they happen
-      // to carry (or excluded for having already been gain-audited before
-      // release). released_at is stamped at cancellation time — anything
-      // released today surfaces here regardless of the two filters above.
-      const { data: rb, error: rbErr } = await supabase
-        .from('purchases')
-        .select(BANG_BILL_COLS)
-        .in('branch_name', bangaloreBranchNames)
-        .gte('released_at', istStartOfDayIso(today))
-        .lt('released_at',  istEndOfDayIso(today))
-        .eq('crm_status', 'approved')
-        .eq('is_deleted', false)
-        .is('booking_id', null)
-      if (rbErr) return Response.json({ error: rbErr.message }, { status: 500 })
+      bangBills = (bbRes.data || []).filter(b => !b.audit_consumed_at)
       const seenIds = new Set(bangBills.map(b => b.id))
-      for (const b of rb || []) if (!seenIds.has(b.id)) { bangBills.push(b); seenIds.add(b.id) }
+      for (const b of (rbRes.data || [])) if (!seenIds.has(b.id)) { bangBills.push(b); seenIds.add(b.id) }
     }
     _bvMark('bangalore_today_ms', bangBills?.length)
 
@@ -860,24 +864,61 @@ export async function GET(req) {
     // SPECIFIC received-but-unbooked bills WITHOUT widening the rule to the whole
     // at_ho backlog. Appended ONLY to inflightPendingBooking below, so they never
     // touch the forward bid-window math (Sections 2/3) or bid targets.
-    let forcePending = []
-    if (outsideBranchNames.length) {
-      const { data: fp, error: fpErr } = await supabase
-        .from('purchases')
-        .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, dispatched_at, stock_status, crm_status')
-        .in('branch_name', outsideBranchNames)
-        .eq('stock_status', 'at_ho')
-        .eq('force_pending_booking', true)
-        .eq('is_deleted', false)
-        .is('booking_id', null)
-      if (fpErr) return Response.json({ error: fpErr.message }, { status: 500 })
-      forcePending = (fp || []).map(b => {
-        const tat = branchMeta[b.branch_name]?.delivery_tat_hours || 24
-        const dispatchDate = b.dispatched_at ? istDateOf(b.dispatched_at) : null
-        const arrivalIst = dispatchDate ? addWorkingDaysSkipSunday(dispatchDate, Math.max(1, Math.ceil(tat / 24))) : null
-        return { ...b, _arrival_date: arrivalIst, _tat_hours: tat }
-      })
-    }
+    // forcePending, bangalorePendingBooking, bangaloreGainRebookable, and
+    // todaysDispatches (below) are four independent queries — none reads
+    // another's result, only the JS filtering after each does — so all four
+    // fire concurrently instead of one after another.
+    const [fpRes, bpbRes, gbrRes, tdRes] = await Promise.all([
+      outsideBranchNames.length
+        ? supabase
+            .from('purchases')
+            .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, dispatched_at, stock_status, crm_status')
+            .in('branch_name', outsideBranchNames)
+            .eq('stock_status', 'at_ho')
+            .eq('force_pending_booking', true)
+            .eq('is_deleted', false)
+            .is('booking_id', null)
+        : Promise.resolve({ data: [], error: null }),
+      bangaloreBranchNames.length
+        ? supabase
+            .from('purchases')
+            .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, dispatched_at, stock_status, crm_status, audit_consumed_at')
+            .in('branch_name', bangaloreBranchNames)
+            .eq('stock_status', 'in_consignment')
+            .eq('crm_status', 'approved')
+            .eq('is_deleted', false)
+            .is('booking_id', null)
+        : Promise.resolve({ data: [], error: null }),
+      bangaloreBranchNames.length
+        ? supabase
+            .from('purchases')
+            .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, crm_status, audit_attributed_to')
+            .in('branch_name', bangaloreBranchNames)
+            .eq('crm_status', 'approved')
+            .eq('is_deleted', false)
+            .is('booking_id', null)
+            .eq('audit_attributed_to', 'gain')
+            .gte('purchase_date', subWorkingDaySkipSunday(bangalorePurchaseDate))
+            .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
+        : Promise.resolve({ data: [], error: null }),
+      preEodEligibleBranchNames.length
+        ? supabase
+            .from('consignments')
+            .select('branch_name')
+            .gte('created_at', `${bangalorePurchaseDate}T00:00:00+05:30`)
+            .lte('created_at', `${bangalorePurchaseDate}T23:59:59+05:30`)
+            .neq('status', 'cancelled')
+            .in('branch_name', preEodEligibleBranchNames)
+        : Promise.resolve({ data: [], error: null }),
+    ])
+    if (fpRes.error) return Response.json({ error: fpRes.error.message }, { status: 500 })
+
+    let forcePending = (fpRes.data || []).map(b => {
+      const tat = branchMeta[b.branch_name]?.delivery_tat_hours || 24
+      const dispatchDate = b.dispatched_at ? istDateOf(b.dispatched_at) : null
+      const arrivalIst = dispatchDate ? addWorkingDaysSkipSunday(dispatchDate, Math.max(1, Math.ceil(tat / 24))) : null
+      return { ...b, _arrival_date: arrivalIst, _tat_hours: tat }
+    })
     _bvMark('outstation_pending_ms', forcePending?.length)
 
     // Consignment created · booking pending — in_consignment + unbooked bills
@@ -904,24 +945,13 @@ export async function GET(req) {
     // consignments still in transit and never booked — created and
     // forgotten, or stuck un-received. Rendered as a consolidated,
     // drill-down sub-group inside Section 1 (Bangalore's own section).
-    let bangalorePendingBooking = []
-    if (bangaloreBranchNames.length) {
-      const section1Ids = new Set(bangBills.map(b => b.id))
-      const { data: bpb } = await supabase
-        .from('purchases')
-        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, dispatched_at, stock_status, crm_status, audit_consumed_at')
-        .in('branch_name', bangaloreBranchNames)
-        .eq('stock_status', 'in_consignment')
-        .eq('crm_status', 'approved')
-        .eq('is_deleted', false)
-        .is('booking_id', null)
-      bangalorePendingBooking = (bpb || [])
-        .filter(b => !b.audit_consumed_at && !section1Ids.has(b.id))
-        // Keep the ORIGIN branch. branch_name gets re-keyed to the owning branch so the
-        // bill groups under the hub it was transferred INTO — which silently hides where
-        // the gold actually came from. Ops needs that on the bill row.
-        .map(b => ({ ...b, _origin_branch: b.branch_name, branch_name: b.current_branch || b.branch_name }))
-    }
+    const section1Ids = new Set(bangBills.map(b => b.id))
+    let bangalorePendingBooking = (bpbRes.data || [])
+      .filter(b => !b.audit_consumed_at && !section1Ids.has(b.id))
+      // Keep the ORIGIN branch. branch_name gets re-keyed to the owning branch so the
+      // bill groups under the hub it was transferred INTO — which silently hides where
+      // the gold actually came from. Ops needs that on the bill row.
+      .map(b => ({ ...b, _origin_branch: b.branch_name, branch_name: b.current_branch || b.branch_name }))
     _bvMark('bangalore_pending_ms', bangalorePendingBooking?.length)
 
     // Bangalore bills the EOD audit already attributed to GAIN that ops may want
@@ -930,24 +960,11 @@ export async function GET(req) {
     // double-counts against gain. Booking one reverses the gain attribution (see
     // create_booking, which clears audit_consumed_at/audit_attributed_to).
     // Scoped to the previous working day onward (today's aren't consumed yet).
-    let bangaloreGainRebookable = []
-    if (bangaloreBranchNames.length) {
-      const { data: gbr } = await supabase
-        .from('purchases')
-        .select('id, application_id, branch_name, current_branch, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, crm_status, audit_attributed_to')
-        .in('branch_name', bangaloreBranchNames)
-        .eq('crm_status', 'approved')
-        .eq('is_deleted', false)
-        .is('booking_id', null)
-        .eq('audit_attributed_to', 'gain')
-        .gte('purchase_date', subWorkingDaySkipSunday(bangalorePurchaseDate))
-        .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
-      bangaloreGainRebookable = (gbr || [])
-        // Keep the ORIGIN branch. branch_name gets re-keyed to the owning branch so the
-        // bill groups under the hub it was transferred INTO — which silently hides where
-        // the gold actually came from. Ops needs that on the bill row.
-        .map(b => ({ ...b, _origin_branch: b.branch_name, branch_name: b.current_branch || b.branch_name }))
-    }
+    let bangaloreGainRebookable = (gbrRes.data || [])
+      // Keep the ORIGIN branch. branch_name gets re-keyed to the owning branch so the
+      // bill groups under the hub it was transferred INTO — which silently hides where
+      // the gold actually came from. Ops needs that on the bill row.
+      .map(b => ({ ...b, _origin_branch: b.branch_name, branch_name: b.current_branch || b.branch_name }))
     _bvMark('gain_rebookable_ms', bangaloreGainRebookable?.length)
 
     // Back-compat alias for the existing UI (renders only the 24h bucket).
@@ -970,17 +987,7 @@ export async function GET(req) {
     // could have a consignment dispatched at 4:30 PM and a new purchase land
     // at 5 PM, and section 4 would still surface that bill as "pickup-pending
     // today" even though logically it belongs to tomorrow's bid.
-    let postDispatchedBranches = new Set()
-    if (preEodEligibleBranchNames.length) {
-      const { data: todaysDispatches } = await supabase
-        .from('consignments')
-        .select('branch_name')
-        .gte('created_at', `${bangalorePurchaseDate}T00:00:00+05:30`)
-        .lte('created_at', `${bangalorePurchaseDate}T23:59:59+05:30`)
-        .neq('status', 'cancelled')
-        .in('branch_name', preEodEligibleBranchNames)
-      postDispatchedBranches = new Set((todaysDispatches || []).map(c => c.branch_name))
-    }
+    const postDispatchedBranches = new Set((tdRes.data || []).map(c => c.branch_name))
     const preEodEligibleAfterDispatch = preEodEligibleBranchNames.filter(n => !postDispatchedBranches.has(n))
     _bvMark('todays_dispatches_ms', postDispatchedBranches?.size)
 
@@ -1169,12 +1176,19 @@ export async function GET(req) {
       const ids = bills.map(b => b.id)
       const linkByBill = {}   // purchase_id → { created_at, created_by }
       const IN_CHUNK = 100
-      for (let i = 0; i < ids.length; i += IN_CHUNK) {
-        const slice = ids.slice(i, i + IN_CHUNK)
-        const { data: links } = await supabase
+      const chunks = []
+      for (let i = 0; i < ids.length; i += IN_CHUNK) chunks.push(ids.slice(i, i + IN_CHUNK))
+      // Fire all chunks concurrently instead of one round trip at a time —
+      // with 1000+ bills (a busy transit window) this was 10-15+ sequential
+      // DB calls for a SINGLE stamp call, and there are up to 4 of these per
+      // request. This was the single biggest contributor to slow loads.
+      const results = await Promise.all(chunks.map(slice =>
+        supabase
           .from('consignment_items')
           .select('purchase_id, consignment:consignment_id(created_at, created_by, status)')
           .in('purchase_id', slice)
+      ))
+      for (const { data: links } of results) {
         for (const l of links || []) {
           const c = l.consignment
           if (!c || c.status === 'cancelled') continue
@@ -1190,13 +1204,16 @@ export async function GET(req) {
         b._consignment_created_by = meta?.created_by || null
       }
     }
-    await stampConsignmentMeta(inflightPendingBooking)
-    await stampConsignmentMeta(bangalorePendingBooking)
-    // Transit tiers (Sections 2/3/4) — stamp so each branch row can show its
-    // consignment-created date next to the TAT chip. inflight24h/48h/72h are
-    // filtered views of inflightWithArrival (same object refs), so stamping the
-    // parent here — before groupByBranch snapshots the bills — covers all three.
-    await stampConsignmentMeta(inflightWithArrival)
+    // These three stamp entirely separate bill arrays (no shared state, no
+    // ordering dependency between them) — safe to run concurrently instead
+    // of one after another. inflight24h/48h/72h are filtered views of
+    // inflightWithArrival (same object refs), so stamping the parent here —
+    // before groupByBranch snapshots the bills — covers all three.
+    await Promise.all([
+      stampConsignmentMeta(inflightPendingBooking),
+      stampConsignmentMeta(bangalorePendingBooking),
+      stampConsignmentMeta(inflightWithArrival),
+    ])
     _bvMark('stamp_meta_ms')
 
     // Annotate each pending-booking branch row with the consignment-creation
