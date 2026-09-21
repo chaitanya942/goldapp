@@ -214,6 +214,17 @@ export default function BiddingVolume() {
   const [loading,      setLoading]      = useState(true)
   const [error,        setError]        = useState(null)
   const [showBookModal, setShowBookModal] = useState(false)
+  // Rebook flow: "Rebook" on a cancelled booking stages its party/rate here,
+  // switches to the source picker on the matching region, and shows a banner
+  // — the original bills were already released back to the general pool
+  // (possibly reattached elsewhere by now), so the operator re-selects
+  // CURRENT available bills rather than the booking being silently recreated.
+  const [rebookDraft, setRebookDraft] = useState(null)   // { party, rate } | null
+  const startRebook = (b) => {
+    setRebookDraft({ party: b.party, rate: b.rate })
+    setRegionTab(b.is_kl ? 'kl' : 'ka_ap_ts')
+    setActiveTab('bidding')
+  }
   const [showSplitModal, setShowSplitModal] = useState(false)
   const [cancelTarget, setCancelTarget] = useState(null)
   const [toast,        setToast]        = useState(null)
@@ -1740,6 +1751,28 @@ export default function BiddingVolume() {
         })()}
       </div>
 
+      {/* Rebook banner — set by "Rebook" on a cancelled booking. The
+          original bills were already released back to the pool (and may
+          have moved since), so this only stages party/rate; the operator
+          re-selects current available bills to reach the weight, same as
+          any other booking. */}
+      {activeTab === 'bidding' && rebookDraft && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, padding: '10px 16px',
+          borderRadius: 9, background: `${t.gold}14`, border: `1px solid ${t.gold}55`,
+        }}>
+          <span style={{ fontSize: 14 }}>↻</span>
+          <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 600, flex: 1 }}>
+            Rebooking <b style={{ color: t.gold }}>{rebookDraft.party}</b> @ ₹{Number(rebookDraft.rate || 0).toLocaleString('en-IN')}/g —
+            select bills below, then Book Selected.
+          </span>
+          <button onClick={() => setRebookDraft(null)}
+            style={{ background: 'transparent', border: 'none', color: t.text4, cursor: 'pointer', fontSize: 13 }}>
+            ✕ cancel
+          </button>
+        </div>
+      )}
+
       {/* ─────────────────────────── BIDDING TAB ────────────────────────── */}
       {activeTab === 'bidding' && regionTab === 'ka_ap_ts' && (<>
 
@@ -2367,6 +2400,7 @@ export default function BiddingVolume() {
             onUnbookBranch={unbookBranchCaseWise}
             onCreateConsignment={createConsignmentForBooking}
             onCreate={() => { setActiveTab('bidding') }}
+            onRebook={startRebook}
           />
           <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
             Bookings stored in <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>cal_quotas</code> — also visible in Sales → Cal Table → Quotas on the same date.
@@ -2396,9 +2430,11 @@ export default function BiddingVolume() {
           bidders={bidders}
           effectiveGainRate={effectiveGainRate}
           isKerala={selectionIsKerala}
+          initialParty={rebookDraft?.party}
+          initialRate={rebookDraft?.rate}
           onSubmit={createBooking}
           onClose={() => setShowBookModal(false)}
-          onSuccess={() => setSelected(new Set())}
+          onSuccess={() => { setSelected(new Set()); setRebookDraft(null) }}
           onSubmitGuardFail={(msg) => showToast(msg, 'error')}
           onDetachBills={(ids) => setSelected(prev => {
             const next = new Set(prev)
@@ -3252,7 +3288,7 @@ const DISPATCH_META = {
   at_risk: { label: '⚠ at risk',           tone: 'red'    },
 }
 
-function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onRequestCancel, onClosePipeline, onReconcile, onUnbook, onUnbookBill, onUnbookBranch, onCreateConsignment, onCreate }) {
+function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onRequestCancel, onClosePipeline, onReconcile, onUnbook, onUnbookBill, onUnbookBranch, onCreateConsignment, onCreate, onRebook }) {
   const [actionBusy, setActionBusy] = useState(null)  // booking id currently mid-action
   const [hideCancelled, setHideCancelled] = useState(true)
   const [exporting, setExporting] = useState(null)    // 'xlsx' | 'png' | null
@@ -3498,7 +3534,7 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
                             arrival day passes, when the leftover folds into
                             gain. A sub-10 g residual can be closed on the
                             spot via the inline button. */}
-                        {pipelineG > 0 && !isSettled && (
+                        {pipelineG > 0 && !isSettled && !isCancelled && (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 0 }}>
                             <span title={`Awaiting ${fmt(pipelineG, 2)} g of incoming purchases (region: ${b.pipeline_region || '—'})`}
                               style={{
@@ -3688,7 +3724,18 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
                   </td>
                   <td style={{ ...td, textAlign: 'center' }}>
                     {isCancelled ? (
-                      <span style={{ color: t.text4 }}>—</span>
+                      onRebook ? (
+                        <button type="button" onClick={() => onRebook(b)}
+                          title={`Rebook ${b.party} — prefills party/rate on a new booking; you'll reselect bills`}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            width: 24, height: 24, borderRadius: 6, background: 'transparent',
+                            border: `1px solid ${t.gold}55`, color: t.gold, lineHeight: 1,
+                            fontSize: 13, fontWeight: 800, cursor: 'pointer',
+                          }}>
+                          ↻
+                        </button>
+                      ) : <span style={{ color: t.text4 }}>—</span>
                     ) : (
                       <button type="button" disabled={actionBusy === b.id}
                         onClick={async () => {
@@ -6127,7 +6174,7 @@ function SplitBookingModal({ t, regionPipe, selectedTotal, selGainRate, bidders,
   )
 }
 
-function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNetWt, gainGrams, pendingGrams, onSavePending, savingPending, bookedQty, selected, selectedTotal, billsById, bidders, effectiveGainRate, isKerala, onSubmit, onClose, onSuccess, onSubmitGuardFail, onDetachBills }) {
+function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNetWt, gainGrams, pendingGrams, onSavePending, savingPending, bookedQty, selected, selectedTotal, billsById, bidders, effectiveGainRate, isKerala, initialParty, initialRate, onSubmit, onClose, onSuccess, onSubmitGuardFail, onDetachBills }) {
   // The quantity committed to a bidder is a *negotiated* figure against the
   // whole available pool (Incoming + Gain ± Pending), not the exact sum of
   // the selected source branches — ops tells a bidder "550 g", a rounded
@@ -6187,8 +6234,8 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
   // selected bills attached (the over-attached gold is the company's realized
   // gain). Reset whenever the bid changes so a fresh under-bid must be re-accepted.
   const [acceptExcess, setAcceptExcess] = useState(false)
-  const [party,       setParty]       = useState('')
-  const [rate,        setRate]        = useState('')
+  const [party,       setParty]       = useState(initialParty || '')
+  const [rate,        setRate]        = useState(initialRate != null ? String(initialRate) : '')
   const [busy,        setBusy]        = useState(false)
   // Local bidder roster (combines API list + names saved during this
   // session). On submit we POST to /api/consignments?action=create_booking
