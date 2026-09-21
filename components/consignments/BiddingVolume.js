@@ -6223,9 +6223,26 @@ function SplitBookingModal({ t, regionPipe, selectedTotal, selGainRate, bidders,
           )}
         </div>
 
+        {/* A disabled <button> fires nothing on click — no toast, no error,
+            nothing — which reads as "the popup is just stuck." Spell out
+            exactly what's missing so it's obvious the form isn't finished
+            rather than broken. */}
+        {!canSubmit && !busy && (() => {
+          const missing = []
+          if (!party.trim()) missing.push('a buyer')
+          if (!wValid) missing.push('a booking weight')
+          if (!prValid) missing.push('a rate')
+          return missing.length ? (
+            <div style={{ padding: '0 22px 10px', fontSize: 11.5, color: t.orange || '#d98a3a', textAlign: 'right' }}>
+              Enter {missing.join(' and ')} to continue.
+            </div>
+          ) : null
+        })()}
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', padding: '14px 22px', borderTop: `1px solid ${t.border}` }}>
           <button onClick={onClose} disabled={busy} style={{ background: 'transparent', border: `1px solid ${t.border2}`, borderRadius: 8, padding: '9px 18px', fontSize: 13, fontWeight: 700, color: t.text2, cursor: busy ? 'not-allowed' : 'pointer' }}>Cancel</button>
-          <button onClick={submit} disabled={!canSubmit} style={{ background: canSubmit ? t.gold : t.border2, color: canSubmit ? '#1a0a00' : t.text4, border: 'none', borderRadius: 8, padding: '10px 22px', fontSize: 13, fontWeight: 900, cursor: canSubmit ? 'pointer' : 'not-allowed', letterSpacing: '.01em' }}>
+          <button onClick={submit} disabled={!canSubmit}
+            title={canSubmit ? undefined : 'Fill in the buyer, weight, and rate first'}
+            style={{ background: canSubmit ? t.gold : t.border2, color: canSubmit ? '#1a0a00' : t.text4, border: 'none', borderRadius: 8, padding: '10px 22px', fontSize: 13, fontWeight: 900, cursor: canSubmit ? 'pointer' : 'not-allowed', letterSpacing: '.01em' }}>
             {busy ? 'Working…' : 'Close pipeline & book →'}
           </button>
         </div>
