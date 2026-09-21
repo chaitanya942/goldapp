@@ -5478,14 +5478,17 @@ export async function POST(req) {
     // available for re-booking. Safe to no-op when nothing was linked.
     if (status === 'cancelled') {
       try {
-        // Snapshot the branch-level sourcing BEFORE releasing the bills below
-        // destroys the purchases.booking_id link — this is the only way a
-        // later "Rebook" can resegment the same branch composition back into
-        // the bidding view, since nothing else records booking->bill history.
+        // Capture which bills are attached BEFORE releasing them below
+        // destroys the purchases.booking_id link — needed both for the
+        // branch-breakdown snapshot (Rebook) and to stamp released_at on
+        // exactly these rows afterward (can't filter by booking_id=id once
+        // it's been nulled).
         const { data: attachedBills } = await supabase
           .from('purchases')
-          .select('branch_name, current_branch, net_weight')
+          .select('id, branch_name, current_branch, net_weight')
           .eq('booking_id', id)
+        const billIds = (attachedBills || []).map(p => p.id)
+
         if (attachedBills?.length) {
           const byBranch = {}
           for (const p of attachedBills) {
@@ -5499,13 +5502,33 @@ export async function POST(req) {
           }
         }
 
-        // released_at marks these as freshly available — Section 1 (Bangalore
-        // today) uses it to surface them under TODAY's bucket regardless of
-        // their original purchase_date or any prior gain-audit attribution.
-        await supabase
+        // The actual release — this must succeed on its own regardless of
+        // whether released_at exists yet. It USED to be combined with the
+        // released_at stamp in one .update() call; if that column isn't
+        // there (migration not yet applied), Postgres rejects the WHOLE
+        // update for referencing an unknown column, silently no-op'ing the
+        // booking_id/booked_at release too (supabase-js doesn't throw on a
+        // query error, so nothing surfaced) — a real regression where
+        // cancelling stopped freeing bills at all. Kept as two calls so a
+        // problem with the second (best-effort) one can never block the first.
+        const { error: releaseErr } = await supabase
           .from('purchases')
-          .update({ booking_id: null, booked_at: null, released_at: now })
+          .update({ booking_id: null, booked_at: null })
           .eq('booking_id', id)
+        if (releaseErr) {
+          console.error('[update_booking_status] failed to release bills:', releaseErr.message)
+        } else if (billIds.length) {
+          // released_at marks these as freshly available — Section 1
+          // (Bangalore today) uses it to surface them under TODAY's bucket
+          // regardless of their original purchase_date or any prior
+          // gain-audit attribution. Best-effort: harmless if this column
+          // isn't there yet (pre-migration) or this write fails.
+          const { error: stampErr } = await supabase
+            .from('purchases')
+            .update({ released_at: now })
+            .in('id', billIds)
+          if (stampErr) console.error('[update_booking_status] failed to stamp released_at:', stampErr.message)
+        }
       } catch (unlinkErr) {
         console.error('[update_booking_status] failed to release bills:', unlinkErr?.message)
       }
