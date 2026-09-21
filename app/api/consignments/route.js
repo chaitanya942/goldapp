@@ -6146,7 +6146,7 @@ export async function POST(req) {
     //    the same set the bid desk sums (and attach_selected_to_pipeline uses).
     const { data: bookings, error: qErr } = await supabase
       .from('cal_quotas')
-      .select('id, date, weight, gain_rate, pending_g, additional_gain_g, is_kl, status, pipeline_closed_at, pipeline_arrival_date, created_at')
+      .select('id, date, weight, gain_rate, pending_g, additional_gain_g, is_kl, status, pipeline_closed_at, pipeline_arrival_date, created_at, bills_net_weight_g')
       .eq('is_kl', klFlag)
       .neq('status', 'cancelled')
       .is('pipeline_closed_at', null)
@@ -6176,10 +6176,21 @@ export async function POST(req) {
     }
     const alloc0 = await allocDeltaByBooking(supabase, bkIds)
     const open = liveBookings.map(b => {
-      const bRate    = b.gain_rate != null ? Number(b.gain_rate) : (b.is_kl ? 0 : 0.035)
-      const attached = (attachedByBk[b.id] || 0) + (alloc0[b.id] || 0)
-      const residual = Math.max(0, Number(b.weight || 0) - (attached + Number(b.pending_g || 0)) * (1 + bRate))
-      return { id: b.id, rate: bRate, residual }
+      const bRate = b.gain_rate != null ? Number(b.gain_rate) : (b.is_kl ? 0 : 0.035)
+      const attachedLive = (attachedByBk[b.id] || 0) + (alloc0[b.id] || 0)
+      // Same fallback the display uses (action=bidding_bookings):  a manual
+      // booking (ops-entered net/gain, no bills) or one whose bills aren't
+      // currently attached falls back to the net snapshot captured at
+      // creation, instead of being treated as having zero sourced weight.
+      // Without this, such a booking's ENTIRE committed weight looked like
+      // open pipeline here even though the display already credits it via
+      // the snapshot — hugely overstating what's actually still owed.
+      const baseNet  = attachedLive > 0 ? attachedLive : Number(b.bills_net_weight_g || 0)
+      const residual = Math.max(0, Number(b.weight || 0) - (baseNet + Number(b.pending_g || 0)) * (1 + bRate))
+      return {
+        id: b.id, rate: bRate, residual,
+        _debug: { weight: Number(b.weight || 0), attached_live_g: attachedLive, bills_net_weight_g: Number(b.bills_net_weight_g || 0), base_net_g: baseNet, pending_g: Number(b.pending_g || 0) },
+      }
     }).filter(b => b.residual > 0.001)
     // Diagnostic surfaced on any rejection below — the client's own "Closes
     // open pipeline" preview is computed from a SEPARATE aggregate
@@ -6193,6 +6204,7 @@ export async function POST(req) {
       open_bookings_count:          open.length,
       open_residual_total_g:        Number(open.reduce((s, b) => s + b.residual, 0).toFixed(3)),
       bill_net_g:                   Number(billNet.toFixed(3)),
+      open_bookings:                open.map(b => ({ id: b.id, residual_g: Number(b.residual.toFixed(3)), ...b._debug })),
     }
     if (open.length === 0) return Response.json({ error: 'No open pipeline for this region/day to close.', debug: debugPipeline }, { status: 400 })
 
