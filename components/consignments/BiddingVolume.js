@@ -1224,7 +1224,15 @@ export default function BiddingVolume() {
       })
       clearTimeout(tid)
       let j = null; try { j = await r.json() } catch {}
-      if (!r.ok || j?.error) { showToast(j?.error || `Split failed (HTTP ${r.status})`, 'error'); return false }
+      if (!r.ok || j?.error) {
+        // j.debug (when present) is the server's authoritative pipeline
+        // recompute — logged so a mismatch against the modal's own preview
+        // (pipelineKLG/pipelineOtherG, a separate client-side aggregate) is
+        // visible without needing to inspect the Network tab manually.
+        if (j?.debug) console.warn('[split_close_and_book] rejected —', j.debug)
+        showToast(j?.error || `Split failed (HTTP ${r.status})`, 'error')
+        return false
+      }
       const d = j?.data || {}
       let msg = `Pipeline ${fmt(d.closed_pipeline_g || 0, 2)} g closed · new booking ${fmt(d.new_booking_weight_g || 0, 2)} g`
       if (d.new_booking_pipeline_g > 0.001) msg += ` (${fmt(d.new_booking_pipeline_g, 2)} g new pipeline)`

@@ -6167,7 +6167,19 @@ export async function POST(req) {
       const residual = Math.max(0, Number(b.weight || 0) - (attached + Number(b.pending_g || 0)) * (1 + bRate))
       return { id: b.id, rate: bRate, residual }
     }).filter(b => b.residual > 0.001)
-    if (open.length === 0) return Response.json({ error: 'No open pipeline for this region/day to close.' }, { status: 400 })
+    // Diagnostic surfaced on any rejection below — the client's own "Closes
+    // open pipeline" preview is computed from a SEPARATE aggregate
+    // (pipelineKLG/pipelineOtherG, summed client-side from whatever the
+    // Bookings tab last fetched) which can disagree with this fresh,
+    // authoritative server-side recompute. Included so a mismatch is
+    // immediately visible instead of just "it didn't work."
+    const debugPipeline = {
+      candidate_bookings_in_window: (bookings || []).length,
+      open_bookings_count:          open.length,
+      open_residual_total_g:        Number(open.reduce((s, b) => s + b.residual, 0).toFixed(3)),
+      bill_net_g:                   Number(billNet.toFixed(3)),
+    }
+    if (open.length === 0) return Response.json({ error: 'No open pipeline for this region/day to close.', debug: debugPipeline }, { status: 400 })
 
     // 3) FIFO-allocate the bill's net to close pipeline residuals (committed
     //    grams closed = net × (1 + booking rate)). Record each allocation.
@@ -6184,8 +6196,8 @@ export async function POST(req) {
     }
     const closedNet    = billNet - remainingNet
     const remainderNet = remainingNet
-    if (closedNet <= 0.001)     return Response.json({ error: 'Nothing to close — selection did not cover any pipeline.' }, { status: 400 })
-    if (remainderNet <= 0.001)  return Response.json({ error: 'Selection fully absorbed by the pipeline — use “Close Pipeline” instead (no remainder to book).' }, { status: 400 })
+    if (closedNet <= 0.001)     return Response.json({ error: 'Nothing to close — selection did not cover any pipeline.', debug: debugPipeline }, { status: 400 })
+    if (remainderNet <= 0.001)  return Response.json({ error: 'Selection fully absorbed by the pipeline — use “Close Pipeline” instead (no remainder to book).', debug: { ...debugPipeline, closed_net_g: Number(closedNet.toFixed(3)) } }, { status: 400 })
 
     // 4) Create the new booking (same created_by UUID/TEXT resilience as create_booking).
     const actorUuid = auth.user?.id || null
