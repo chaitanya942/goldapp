@@ -10,29 +10,44 @@ const supabase = createClient(
 )
 
 // ── Kalinga Kawad ─────────────────────────────────────────────────────────────
-async function fetchKalingaRate() {
-  try {
-    const url = `https://bcast.kalingakawad.com:7768/VOTSBroadcastStreaming/Services/xml/GetLiveRateByTemplateID/kalingabanglore?_=${Date.now()}`
-    const res  = await fetch(url, {
-      headers: { 'Referer': 'https://kalingakawad.com/', 'Accept': 'text/plain' },
-      signal: AbortSignal.timeout(8000),
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const text = await res.text()
-    for (const line of text.trim().split('\n')) {
-      if (line.toUpperCase().includes('GOLD 999') && line.toUpperCase().includes('WITH GST FOR REF')) {
-        const numbers = line.match(/\d+/g)
-        if (numbers && numbers.length >= 3) {
-          const sell = parseFloat(numbers[2])
-          if (sell > 100000) return sell
-        }
+async function fetchKalingaOnce(timeoutMs) {
+  const url = `https://bcast.kalingakawad.com:7768/VOTSBroadcastStreaming/Services/xml/GetLiveRateByTemplateID/kalingabanglore?_=${Date.now()}`
+  const res = await fetch(url, {
+    headers: { 'Referer': 'https://kalingakawad.com/', 'Accept': 'text/plain' },
+    signal: AbortSignal.timeout(timeoutMs),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const text = await res.text()
+  for (const line of text.trim().split('\n')) {
+    if (line.toUpperCase().includes('GOLD 999') && line.toUpperCase().includes('WITH GST FOR REF')) {
+      const numbers = line.match(/\d+/g)
+      if (numbers && numbers.length >= 3) {
+        const sell = parseFloat(numbers[2])
+        if (sell > 100000) return sell
       }
     }
-    return null
-  } catch (err) {
-    console.error('Kalinga fetch error:', err.message)
-    return null
   }
+  throw new Error('No matching "GOLD 999 ... WITH GST FOR REF" line in response')
+}
+
+// Retried once on a transient failure (timeout, network blip, momentary bad
+// status) before giving up for this minute's cycle. The intraday Booking
+// Volume chart uses Kalinga ONLY now (no cross-vendor fallback, per ops),
+// so a single dropped request here used to leave a visible gap in that
+// chart even though the feed itself was fine seconds later. Per-attempt
+// logging so a real, sustained outage is distinguishable from an
+// occasional blip in the logs.
+async function fetchKalingaRate() {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      return await fetchKalingaOnce(attempt === 1 ? 8000 : 12000)
+    } catch (err) {
+      console.error(`Kalinga fetch error (attempt ${attempt}/2):`, err.message)
+      if (attempt === 2) return null
+      await new Promise(r => setTimeout(r, 1500))
+    }
+  }
+  return null
 }
 
 // ── Ambicaa via Firebase REST ─────────────────────────────────────────────────
