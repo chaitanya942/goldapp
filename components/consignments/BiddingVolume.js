@@ -2924,13 +2924,10 @@ const partyColor = (name) => {
 // within a few minutes of each other are merged into a single clickable
 // cluster marker so the chart stays readable.
 
-// Which gold_rates column to treat as "the" market reference line — same
-// priority/color convention as LiveMarketRates.js (kalinga = gold = primary).
-const RATE_FIELDS = [
-  { key: 'kalinga_sell_rate', label: 'Kalinga' },
-  { key: 'ambica_sell_rate',  label: 'Ambica'  },
-  { key: 'aamlin_sell_rate',  label: 'Aamlin'  },
-]
+// gold_rates column used as "the" market reference line — Kalinga Kawad
+// only, per ops. Deliberately never falls back to Ambica/Aamlin even when
+// Kalinga has no data for the day (see rateField below).
+const RATE_FIELD = { key: 'kalinga_sell_rate', label: 'Kalinga' }
 
 // Minutes since IST midnight for a timestamptz — matches the row's own IST
 // calendar day since callers pre-filter to that day's bounds.
@@ -3199,14 +3196,11 @@ function BookingRateChart({ t, card, date, bookings }) {
     return () => { cancelled = true }
   }, [date])
 
-  // Kalinga Kawad is the reference rate ops actually trades against — always
-  // used when it has any data at all that day. Only fall back to the next
-  // source in RATE_FIELDS order if Kalinga has zero rows (e.g. its feed was
-  // down all day), so the line still renders instead of going blank.
-  const rateField = useMemo(() => {
-    if (!rateRows?.length) return RATE_FIELDS[0]
-    return RATE_FIELDS.find(f => rateRows.some(r => r[f.key] != null)) || RATE_FIELDS[0]
-  }, [rateRows])
+  // Kalinga Kawad only — per ops, never substitute Ambica (or any other
+  // source) even when Kalinga has no data for the day. Showing a different
+  // vendor's rate under the same "Kalinga sell rate" comparison would be
+  // misleading, since bookings are compared against Kalinga specifically.
+  const rateField = RATE_FIELD
 
   // Full-day series (needed so a 9 AM hourly point can still look back at
   // rows fetched just before 9 if the exact minute is missing), windowed to
