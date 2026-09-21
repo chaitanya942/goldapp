@@ -219,49 +219,28 @@ export default function BiddingVolume() {
   const [loading,      setLoading]      = useState(true)
   const [error,        setError]        = useState(null)
   const [showBookModal, setShowBookModal] = useState(false)
-  // Rebook flow: "Rebook" on a cancelled booking stages its party/rate here,
-  // switches to the source picker on the matching region, and shows a banner
-  // — the original bills were already released back to the general pool
-  // (possibly reattached elsewhere by now), so the operator re-selects
-  // CURRENT available bills rather than the booking being silently recreated.
-  // `breakdown` (cancelled_branch_breakdown, captured at cancellation — see
-  // app/api/consignments/route.js) lists the branches/weights that sourced
-  // the original booking; null for bookings cancelled before this shipped.
-  const [rebookDraft, setRebookDraft] = useState(null)   // { party, rate, breakdown } | null
-  const startRebook = (b) => {
-    setRebookDraft({ party: b.party, rate: b.rate, breakdown: b.cancelled_branch_breakdown || null })
-    setRegionTab(b.is_kl ? 'kl' : 'ka_ap_ts')
-    setActiveTab('bidding')
-  }
-  // "Groups" billsById tags bills with (see the collect() calls building it)
-  // — excludes the *_booked / *_dispatched_today groups so a rebook can never
-  // silently re-grab a bill that's already committed elsewhere, matching the
-  // same intent as the one-click "Available to Book" sweep.
-  const REBOOK_BOOKABLE_GROUPS = new Set([
-    'bangalore', 'transit_24h', 'transit_48h', 'transit_72h', 'transit_pending_booking',
-    'bangalore_pending_booking', 'bangalore_gain_rebookable', 'branch_pre_eod',
-    'kl_hub_stock', 'kl_hub_from_leaf', 'kl_in_movement', 'kl_created_not_booked', 'kl_at_leaf',
-  ])
-  // Ticks currently-available bills from `branchName` — oldest purchase date
-  // first — up to (but not exceeding, where possible) targetG. Spans every
-  // section (Bangalore/transit/KL) since the same branch can have eligible
-  // bills in more than one at once; the original section may no longer be
-  // where its replacement stock sits.
-  const selectBranchUpTo = (branchName, targetG) => {
-    setSelected(prev => {
-      const next = new Set(prev)
-      const candidates = Object.values(billsById)
-        .filter(b => b._branch_name === branchName && REBOOK_BOOKABLE_GROUPS.has(b._group))
-        .filter(b => !b.audit_hold && !isDateLocked(b.purchase_date) && !next.has(b.id))
-        .sort((a, b2) => new Date(a.purchase_date) - new Date(b2.purchase_date))
-      let acc = 0
-      for (const b of candidates) {
-        if (acc >= targetG) break
-        next.add(b.id)
-        acc += Number(b.net_weight || 0)
-      }
-      return next
-    })
+  const [reactivatingId, setReactivatingId] = useState(null)
+  // Rebook = bring the SAME cancelled booking back to life, not build a new
+  // one. Explicitly does NOT try to re-attach its old bills (per ops — those
+  // are already back in general circulation and may have moved since); it
+  // just reopens the weight commitment as a fresh, fully-unsourced booking,
+  // same starting state as any brand-new booking. The existing pipeline /
+  // auto-attach system takes it from there exactly like it would a new one.
+  const reactivateBooking = async (b) => {
+    if (!window.confirm(`Rebook ${b.party}?\n\nThis makes the booking live again for ${fmt(b.weight, 2)} g @ ₹${fmt(b.rate, 2)}/g. Bills are NOT re-attached — it reopens as a fresh, unsourced commitment.`)) return
+    setReactivatingId(b.id)
+    try {
+      const r = await authedFetch('/api/consignments?action=reactivate_booking', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: b.id }),
+      })
+      const j = await r.json()
+      if (!r.ok || j.error) { showToast(j.error || 'Rebook failed', 'error'); return }
+      showToast(`${b.party} rebooked — live again.`, 'success')
+      fetchAll(true)
+    } finally {
+      setReactivatingId(null)
+    }
   }
   const [showSplitModal, setShowSplitModal] = useState(false)
   const [cancelTarget, setCancelTarget] = useState(null)
@@ -1789,59 +1768,6 @@ export default function BiddingVolume() {
         })()}
       </div>
 
-      {/* Rebook banner — set by "Rebook" on a cancelled booking. The
-          original bills were already released back to the pool (and may
-          have moved since), so exact re-attachment isn't possible — but if
-          a branch-level breakdown was captured at cancellation time, each
-          branch's target weight can be one-click re-selected from whatever
-          matching stock is CURRENTLY available. Older cancellations (before
-          this shipped) have no breakdown, so this falls back to plain
-          party/rate prefill and manual selection. */}
-      {activeTab === 'bidding' && rebookDraft && (
-        <div style={{ marginBottom: 14, padding: '10px 16px', borderRadius: 9, background: `${t.gold}14`, border: `1px solid ${t.gold}55` }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 14 }}>↻</span>
-            <span style={{ fontSize: 12.5, color: t.text1, fontWeight: 600, flex: 1 }}>
-              Rebooking <b style={{ color: t.gold }}>{rebookDraft.party}</b> @ ₹{Number(rebookDraft.rate || 0).toLocaleString('en-IN')}/g
-              {rebookDraft.breakdown?.length
-                ? ' — apply its original branch sourcing below, or select bills manually, then Book Selected.'
-                : ' — no branch history for this booking (cancelled before this feature shipped); select bills below, then Book Selected.'}
-            </span>
-            <button onClick={() => setRebookDraft(null)}
-              style={{ background: 'transparent', border: 'none', color: t.text4, cursor: 'pointer', fontSize: 13 }}>
-              ✕ cancel
-            </button>
-          </div>
-          {rebookDraft.breakdown?.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${t.gold}30` }}>
-              {rebookDraft.breakdown.map(entry => {
-                const available = Object.values(billsById).filter(b =>
-                  b._branch_name === entry.branch && REBOOK_BOOKABLE_GROUPS.has(b._group) && !b.audit_hold && !isDateLocked(b.purchase_date)
-                ).reduce((s, b) => s + Number(b.net_weight || 0), 0)
-                const short = available < entry.net_weight_g - 0.5
-                return (
-                  <button key={entry.branch} onClick={() => selectBranchUpTo(entry.branch, entry.net_weight_g)}
-                    title={short ? `Only ${fmt(available, 2)}g currently available from ${entry.branch} — will select all of it` : `Selects ${fmt(entry.net_weight_g, 2)}g from ${entry.branch}`}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 8,
-                      background: t.card, border: `1px solid ${short ? (t.orange || '#d98a3a') : t.border}`,
-                      color: t.text1, fontSize: 11.5, fontWeight: 700, cursor: 'pointer',
-                    }}>
-                    <span style={{ color: t.gold }}>{entry.branch}</span>
-                    <span style={{ fontFamily: 'monospace', color: t.text3 }}>{fmt(entry.net_weight_g, 2)}g</span>
-                    {short && <span style={{ color: t.orange || '#d98a3a', fontSize: 10 }}>⚠ only {fmt(available, 2)}g now</span>}
-                  </button>
-                )
-              })}
-              <button onClick={() => rebookDraft.breakdown.forEach(entry => selectBranchUpTo(entry.branch, entry.net_weight_g))}
-                style={{ padding: '5px 12px', borderRadius: 8, background: t.gold, border: 'none', color: '#1a0a00', fontSize: 11.5, fontWeight: 800, cursor: 'pointer' }}>
-                Apply all branches
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* ─────────────────────────── BIDDING TAB ────────────────────────── */}
       {activeTab === 'bidding' && regionTab === 'ka_ap_ts' && (<>
 
@@ -2491,7 +2417,8 @@ export default function BiddingVolume() {
             onUnbookBranch={unbookBranchCaseWise}
             onCreateConsignment={createConsignmentForBooking}
             onCreate={() => { setActiveTab('bidding') }}
-            onRebook={startRebook}
+            onRebook={reactivateBooking}
+            reactivatingId={reactivatingId}
           />
           <div style={{ fontSize: '10px', color: t.text4, textAlign: 'right' }}>
             Bookings stored in <code style={{ background: t.card2, padding: '1px 4px', borderRadius: '3px', color: t.text3 }}>cal_quotas</code> — also visible in Sales → Cal Table → Quotas on the same date.
@@ -2521,11 +2448,9 @@ export default function BiddingVolume() {
           bidders={bidders}
           effectiveGainRate={effectiveGainRate}
           isKerala={selectionIsKerala}
-          initialParty={rebookDraft?.party}
-          initialRate={rebookDraft?.rate}
           onSubmit={createBooking}
           onClose={() => setShowBookModal(false)}
-          onSuccess={() => { setSelected(new Set()); setRebookDraft(null) }}
+          onSuccess={() => setSelected(new Set())}
           onSubmitGuardFail={(msg) => showToast(msg, 'error')}
           onDetachBills={(ids) => setSelected(prev => {
             const next = new Set(prev)
@@ -3379,7 +3304,7 @@ const DISPATCH_META = {
   at_risk: { label: '⚠ at risk',           tone: 'red'    },
 }
 
-function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onRequestCancel, onClosePipeline, onReconcile, onUnbook, onUnbookBill, onUnbookBranch, onCreateConsignment, onCreate, onRebook }) {
+function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onRequestCancel, onClosePipeline, onReconcile, onUnbook, onUnbookBill, onUnbookBranch, onCreateConsignment, onCreate, onRebook, reactivatingId }) {
   const [actionBusy, setActionBusy] = useState(null)  // booking id currently mid-action
   const [hideCancelled, setHideCancelled] = useState(true)
   const [exporting, setExporting] = useState(null)    // 'xlsx' | 'png' | null
@@ -3816,15 +3741,16 @@ function BookingsList({ t, card, bookings, biddingDate, onUpdateStatus, onReques
                   <td style={{ ...td, textAlign: 'center' }}>
                     {isCancelled ? (
                       onRebook ? (
-                        <button type="button" onClick={() => onRebook(b)}
-                          title={`Rebook ${b.party} — sends this booking's branch-level sourcing back to Bidding`}
+                        <button type="button" disabled={reactivatingId === b.id} onClick={() => onRebook(b)}
+                          title={`Rebook ${b.party} — makes this booking live again (bills are not re-attached)`}
                           style={{
                             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4,
                             padding: '4px 10px', borderRadius: 6, background: 'transparent',
                             border: `1px solid ${t.gold}55`, color: t.gold, lineHeight: 1,
-                            fontSize: 11, fontWeight: 800, cursor: 'pointer', whiteSpace: 'nowrap',
+                            fontSize: 11, fontWeight: 800, cursor: reactivatingId === b.id ? 'wait' : 'pointer', whiteSpace: 'nowrap',
+                            opacity: reactivatingId === b.id ? 0.5 : 1,
                           }}>
-                          ↻ Rebook
+                          {reactivatingId === b.id ? '· rebooking…' : '↻ Rebook'}
                         </button>
                       ) : <span style={{ color: t.text4 }}>—</span>
                     ) : (
@@ -6265,7 +6191,7 @@ function SplitBookingModal({ t, regionPipe, selectedTotal, selGainRate, bidders,
   )
 }
 
-function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNetWt, gainGrams, pendingGrams, onSavePending, savingPending, bookedQty, selected, selectedTotal, billsById, bidders, effectiveGainRate, isKerala, initialParty, initialRate, onSubmit, onClose, onSuccess, onSubmitGuardFail, onDetachBills }) {
+function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNetWt, gainGrams, pendingGrams, onSavePending, savingPending, bookedQty, selected, selectedTotal, billsById, bidders, effectiveGainRate, isKerala, onSubmit, onClose, onSuccess, onSubmitGuardFail, onDetachBills }) {
   // The quantity committed to a bidder is a *negotiated* figure against the
   // whole available pool (Incoming + Gain ± Pending), not the exact sum of
   // the selected source branches — ops tells a bidder "550 g", a rounded
@@ -6325,8 +6251,8 @@ function BookingModal({ t, arrivalDate, availablePool, remainingQty, incomingNet
   // selected bills attached (the over-attached gold is the company's realized
   // gain). Reset whenever the bid changes so a fresh under-bid must be re-accepted.
   const [acceptExcess, setAcceptExcess] = useState(false)
-  const [party,       setParty]       = useState(initialParty || '')
-  const [rate,        setRate]        = useState(initialRate != null ? String(initialRate) : '')
+  const [party,       setParty]       = useState('')
+  const [rate,        setRate]        = useState('')
   const [busy,        setBusy]        = useState(false)
   // Local bidder roster (combines API list + names saved during this
   // session). On submit we POST to /api/consignments?action=create_booking

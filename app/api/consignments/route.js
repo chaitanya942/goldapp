@@ -3231,7 +3231,7 @@ export async function POST(req) {
   // can see the Bidding Volume page (page.consignment-bidding) rather than
   // a hardcoded role group — so the gate can never lock out whichever role
   // ops actually grant the page to (the KT §VII trap-2 lesson).
-  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'create_manual_booking', 'attach_bills_to_booking', 'reconcile_booking', 'update_booking_status', 'close_booking_pipeline', 'toggle_bill_hold', 'unbook_bills', 'attach_selected_to_pipeline', 'lock_dates', 'unlock_dates'])
+  const BIDDING_WRITES = new Set(['set_bidding_pending', 'create_booking', 'create_manual_booking', 'attach_bills_to_booking', 'reconcile_booking', 'update_booking_status', 'close_booking_pipeline', 'toggle_bill_hold', 'unbook_bills', 'attach_selected_to_pipeline', 'lock_dates', 'unlock_dates', 'reactivate_booking'])
   let auth
   if (BIDDING_WRITES.has(action)) {
     auth = await requireAuthForPage(req, 'consignment-bidding')
@@ -5537,6 +5537,58 @@ export async function POST(req) {
     return Response.json({ data, message: `Booking marked ${status}.` })
   }
 
+  // ── Reactivate a cancelled booking ("Rebook") ────────────────────────────
+  // Per ops: rebooking should bring the SAME booking back to life rather
+  // than build a new one from scratch — and explicitly does NOT try to
+  // re-attach its old bills (those are already back in general circulation
+  // and may since have moved). It comes back as a fully-open commitment,
+  // same as any freshly-created booking with no bills attached yet — the
+  // existing pipeline/auto-attach system sources it from here exactly like
+  // it would a new booking.
+  if (action === 'reactivate_booking') {
+    const { id } = body
+    if (!id) return Response.json({ error: 'id required' }, { status: 400 })
+
+    const { data: existing, error: fetchErr } = await supabase
+      .from('cal_quotas')
+      .select('id, status')
+      .eq('id', id)
+      .single()
+    if (fetchErr || !existing) return Response.json({ error: 'Booking not found' }, { status: 404 })
+    if (existing.status !== 'cancelled') {
+      return Response.json({ error: 'Only cancelled bookings can be reactivated.' }, { status: 400 })
+    }
+
+    // Fresh arrival date — the original may be long past, and a lapsed
+    // arrival date would make the derived-gain model treat the whole
+    // weight as already "settled" (written off to gain) instead of open
+    // pipeline needing sourcing. Same default a brand-new booking gets.
+    const nextArrival = addWorkingDaysSkipSunday(istToday(), 1)
+
+    const { data, error: updErr } = await supabase
+      .from('cal_quotas')
+      .update({
+        status: 'booked',
+        date: nextArrival,
+        cancelled_at: null,
+        cancelled_by: null,
+        cancellation_reason: null,
+        // Un-settle any prior pipeline closure so derived_pipeline_g reads
+        // the full weight as owed again, not 0-via-already-settled.
+        pipeline_closed_at: null,
+        pipeline_arrival_date: null,
+        // No bills are attached (explicitly not re-linking the old ones),
+        // so the old attached-weight snapshot would be stale/misleading.
+        bills_net_weight_g: 0,
+        cancelled_branch_breakdown: null,
+      })
+      .eq('id', id)
+      .select()
+      .single()
+    if (updErr) return Response.json({ error: updErr.message }, { status: 500 })
+
+    return Response.json({ data, message: 'Booking reactivated — back in the pipeline, no bills attached yet.' })
+  }
 
   // ── Cancel consignment (reverse flow) ────────────────────────────────────
   // Voids a consignment that was created by mistake. Bills return to source.
