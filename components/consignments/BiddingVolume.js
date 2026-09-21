@@ -194,6 +194,11 @@ export default function BiddingVolume() {
   const defaultArrival = addWorkingDaysSkipSunday(today, 1)
 
   const [arrivalDate,  setArrivalDate]  = useState(defaultArrival)
+  // Overrides which day's Bangalore purchases Section 1 shows — normally
+  // derived from arrivalDate (one working day before it), but ops sometimes
+  // needs to check a specific past day directly (e.g. bills a same-day
+  // cancellation released). null = use the normal derived date.
+  const [bangaloreDateOverride, setBangaloreDateOverride] = useState(null)
   // Bookings tab pivots on bidding day (the date the booking was placed),
   // separate from arrivalDate. Defaults to today so the freshly-placed
   // bookings show up. ← / → step through past bidding days; the hero +
@@ -389,7 +394,7 @@ export default function BiddingVolume() {
     setError(null)
     try {
       const [supR, bkR, cmpTodayR, cmpYestR] = await Promise.all([
-        authedFetch(`/api/consignments?action=bidding_volume&date=${arrivalDate}`),
+        authedFetch(`/api/consignments?action=bidding_volume&date=${arrivalDate}${bangaloreDateOverride ? `&bangalore_date=${bangaloreDateOverride}` : ''}`),
         // Bookings use bidding_date (created_at IST) — so the operator sees
         // bookings on the day they were placed, not the arrival day.
         authedFetch(`/api/consignments?action=bidding_bookings&bidding_date=${bookingsDate}`),
@@ -414,7 +419,7 @@ export default function BiddingVolume() {
     } finally {
       setLoading(false)
     }
-  }, [arrivalDate, bookingsDate])
+  }, [arrivalDate, bookingsDate, bangaloreDateOverride])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -1898,13 +1903,34 @@ export default function BiddingVolume() {
 
       {/* 1 · Today's Bangalore purchases */}
       {(activeSection === '1') && (
+      <>
+      {/* Date override — Section 1 normally shows whichever Bangalore
+          purchase day is derived from the arrival date; this lets ops jump
+          straight to a specific past day instead (e.g. to check bills a
+          same-day cancellation released back into the pool). */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 10.5, color: t.text4, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 700 }}>
+          Bangalore purchase date
+        </span>
+        <input type="date"
+          value={bangaloreDateOverride || supply?.bangalore_purchase_date || ''}
+          onChange={(e) => setBangaloreDateOverride(e.target.value || null)}
+          style={{ padding: '4px 8px', borderRadius: 6, border: `1px solid ${t.border}`, background: t.card, color: t.text1, fontSize: 11.5 }}
+        />
+        {bangaloreDateOverride && (
+          <button onClick={() => setBangaloreDateOverride(null)}
+            style={{ background: 'transparent', border: 'none', color: t.gold, cursor: 'pointer', fontSize: 11, fontWeight: 700 }}>
+            ↺ reset to today's default
+          </button>
+        )}
+      </div>
       <SourceSection
         t={t} card={card}
         index={1}
         icon="🏙"
         title="Today's Bangalore purchases"
         subtitle={supply?.bangalore_purchase_date
-          ? `Bangalore purchases (${fmtDateShort(supply.bangalore_purchase_date)}) · arrive at HO ${fmtDate(arrivalDate)}`
+          ? `Bangalore purchases (${fmtDateShort(supply.bangalore_purchase_date)}) · arrive at HO ${fmtDate(arrivalDate)}${bangaloreDateOverride ? ' · custom date' : ''}`
           : `Today's Bangalore purchases · arrive at HO ${fmtDate(arrivalDate)}`}
         accent={t.gold}
         branches={bangBranches}
@@ -1926,7 +1952,8 @@ export default function BiddingVolume() {
         branchSelectionState={branchSelectionState}
         onToggleHold={toggleBillHold}
         emptyMsg="No Bangalore purchases recorded today yet."
-      />)}
+      />
+      </>)}
 
       {/* 1b · Consumed as gain — late-book. Earlier Bangalore bills the EOD
             audit attributed to gain; selectable here so ops can pull one back

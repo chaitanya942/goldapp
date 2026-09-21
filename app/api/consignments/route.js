@@ -700,7 +700,10 @@ export async function GET(req) {
       if (dt.getUTCDay() === 0) dt.setUTCDate(dt.getUTCDate() - 1)   // walk past Sunday
       return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
     }
-    const bangalorePurchaseDate = subWorkingDaySkipSunday(arrivalDate)
+    // Optional override — lets ops view a specific past Bangalore purchase
+    // day directly (e.g. to check on bills released by a same-day cancel)
+    // instead of only ever seeing the one derived from the arrival date.
+    const bangalorePurchaseDate = searchParams.get('bangalore_date') || subWorkingDaySkipSunday(arrivalDate)
 
     // dayAfterArrival should also skip Sunday — if arrival is Friday or
     // Saturday, the next working arrival is Monday, not Sunday.
