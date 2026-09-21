@@ -2554,7 +2554,7 @@ export async function GET(req) {
     // EWBs generated in window
     let ewbQ = supabase
       .from('consignments')
-      .select('id, tmp_prf_no, branch_name, dest_branch, movement_type, eway_bill_no, ewb_generated_at, ewb_valid_until, total_bills, total_gross_wt, total_net_wt, total_amount, approval_status, status, einvoice_doc_no, irn, einvoice_generated_at')
+      .select('id, created_at, tmp_prf_no, branch_name, dest_branch, movement_type, eway_bill_no, ewb_generated_at, ewb_valid_until, total_bills, total_gross_wt, total_net_wt, total_amount, approval_status, status, einvoice_doc_no, irn, einvoice_generated_at')
       .not('eway_bill_no', 'is', null)
       .gte('ewb_generated_at', fromIso)
       .lte('ewb_generated_at', toIso)
@@ -2566,7 +2566,7 @@ export async function GET(req) {
     // E-Invoices generated in window
     let eiQ = supabase
       .from('consignments')
-      .select('id, tmp_prf_no, branch_name, dest_branch, movement_type, irn, ack_no, ack_dt, einvoice_doc_no, einvoice_generated_at, total_bills, total_gross_wt, total_net_wt, total_amount, approval_status, status, eway_bill_no, ewb_generated_at')
+      .select('id, created_at, tmp_prf_no, branch_name, dest_branch, movement_type, irn, ack_no, ack_dt, einvoice_doc_no, einvoice_generated_at, total_bills, total_gross_wt, total_net_wt, total_amount, approval_status, status, eway_bill_no, ewb_generated_at')
       .not('irn', 'is', null)
       .gte('einvoice_generated_at', fromIso)
       .lte('einvoice_generated_at', toIso)
@@ -2601,7 +2601,22 @@ export async function GET(req) {
 
     return Response.json({
       from: fromStr, to: toStr,
-      ewbs: (ewbRes.data || []).map(r => ({ ...r, generated_by: actorByEwb.get(r.id) || null })),
+      // is_interstate for an EWB row: whether that SAME consignment also has
+      // an e-invoice (irn set) — e-invoices only ever get generated for
+      // outstation-branch → Karnataka-HO stock transfers (see the fixed
+      // rule below), so a plain EWB with no irn stayed within one state.
+      ewbs: (ewbRes.data || []).map(r => {
+        const isInterstate = !!r.irn
+        const raw          = Number(r.total_amount || 0)
+        const assessable   = isInterstate ? parseFloat((raw * (1 + upliftPct / 100)).toFixed(2)) : null
+        const igstAmount   = isInterstate ? parseFloat((assessable * igstRate / 100).toFixed(2)) : null
+        return {
+          ...r,
+          generated_by:   actorByEwb.get(r.id) || null,
+          is_interstate:  isInterstate,
+          igst_amount:    igstAmount,
+        }
+      }),
       einvoices: (eiRes.data || []).map(r => {
         // E-Invoice is always interstate (KL/TS/AP source → KA HO), so the
         // grand total is assessable + IGST. CGST/SGST = 0. Same formulas the
@@ -2613,6 +2628,7 @@ export async function GET(req) {
         return {
           ...r,
           generated_by:     actorByEi.get(r.id) || null,
+          is_interstate:    true,
           assessable_value: assessable,
           igst_amount:      igstAmount,
           total_invoice:    totalInvoice,
