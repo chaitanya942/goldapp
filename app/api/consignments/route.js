@@ -762,11 +762,12 @@ export async function GET(req) {
     //    be at_branch, in_consignment, or at_ho. All of them count toward
     //    tomorrow's bid. (Yesterday's stragglers that were attributed to gain
     //    are surfaced separately as bangalore_gain_rebookable below.)
+    const BANG_BILL_COLS = 'id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, dispatched_at, crm_status, audit_hold, audit_consumed_at, released_at'
     let bangBills = []
     if (bangaloreBranchNames.length) {
       const { data: bb, error: bbErr } = await supabase
         .from('purchases')
-        .select('id, application_id, branch_name, customer_name, gross_weight, net_weight, total_amount, purchase_date, transaction_time, stock_status, dispatched_at, crm_status, audit_hold, audit_consumed_at')
+        .select(BANG_BILL_COLS)
         .in('branch_name', bangaloreBranchNames)
         .gte('purchase_date', bangalorePurchaseDate)
         .lt('purchase_date',  addDays(bangalorePurchaseDate, 1))
@@ -777,6 +778,24 @@ export async function GET(req) {
       // Don't surface bills the EOD audit already consumed — they're now
       // labelled gain and shouldn't show as bookable.
       bangBills = (bb || []).filter(b => !b.audit_consumed_at)
+
+      // A booking cancellation should make its bills immediately rebookable
+      // TODAY, not stuck under whatever historical purchase_date they happen
+      // to carry (or excluded for having already been gain-audited before
+      // release). released_at is stamped at cancellation time — anything
+      // released today surfaces here regardless of the two filters above.
+      const { data: rb, error: rbErr } = await supabase
+        .from('purchases')
+        .select(BANG_BILL_COLS)
+        .in('branch_name', bangaloreBranchNames)
+        .gte('released_at', istStartOfDayIso(today))
+        .lt('released_at',  istEndOfDayIso(today))
+        .eq('crm_status', 'approved')
+        .eq('is_deleted', false)
+        .is('booking_id', null)
+      if (rbErr) return Response.json({ error: rbErr.message }, { status: 500 })
+      const seenIds = new Set(bangBills.map(b => b.id))
+      for (const b of rb || []) if (!seenIds.has(b.id)) { bangBills.push(b); seenIds.add(b.id) }
     }
     _bvMark('bangalore_today_ms', bangBills?.length)
 
@@ -5480,9 +5499,12 @@ export async function POST(req) {
           }
         }
 
+        // released_at marks these as freshly available — Section 1 (Bangalore
+        // today) uses it to surface them under TODAY's bucket regardless of
+        // their original purchase_date or any prior gain-audit attribution.
         await supabase
           .from('purchases')
-          .update({ booking_id: null, booked_at: null })
+          .update({ booking_id: null, booked_at: null, released_at: now })
           .eq('booking_id', id)
       } catch (unlinkErr) {
         console.error('[update_booking_status] failed to release bills:', unlinkErr?.message)
