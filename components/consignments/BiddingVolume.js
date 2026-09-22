@@ -2944,19 +2944,6 @@ function fmtDayMinutes(m) {
   return mm === 0 ? `${h12} ${ampm}` : `${h12}:${String(mm).padStart(2, '0')} ${ampm}`
 }
 
-// Centered moving average — smooths minute-to-minute market-rate noise for
-// display so the line reads as a clean trend instead of a jagged zigzag.
-// Purely cosmetic: callers needing the exact quoted rate at a moment (booking
-// reference rates, hourly labels) read from the unsmoothed series instead.
-function smoothSeries(series, window = 5) {
-  if (series.length <= window) return series
-  const half = Math.floor(window / 2)
-  return series.map((pt, i) => {
-    const slice = series.slice(Math.max(0, i - half), Math.min(series.length, i + half + 1))
-    return { ...pt, rate: slice.reduce((s, p) => s + p.rate, 0) / slice.length }
-  })
-}
-
 // Nearest-by-time lookup — "gold market/reference rate at that time" for a
 // booking that didn't happen to land exactly on a gold_rates fetch tick.
 function nearestRate(series, minutes) {
@@ -3198,9 +3185,8 @@ function BookingRateChart({ t, card, date, bookings }) {
 
   const rateField = RATE_FIELD
 
-  // Full-day series (needed so a 9 AM hourly point can still look back at
-  // rows fetched just before 9 if the exact minute is missing), windowed to
-  // the 9 AM – 9 PM business-hours view for display.
+  // Full day's raw ticks, kept only so the hourly snapshot below can find the
+  // nearest actual quote when the exact top-of-hour minute has no row.
   const rateLineAll = useMemo(() => {
     if (!rateRows?.length) return []
     // gold_rates.*_sell_rate is quoted per 10 grams (standard bullion-market
@@ -3213,18 +3199,11 @@ function BookingRateChart({ t, card, date, bookings }) {
       .map(r => ({ minutes: toDayMinutes(r.fetched_at), rate: r[rateField.key] / 10 }))
   }, [rateRows, rateField])
 
-  const rateLine = useMemo(() => {
-    const windowed = rateLineAll.filter(r => r.minutes >= DAY_START_MIN && r.minutes <= DAY_END_MIN)
-    // Light smoothing purely for the drawn line — real minute-to-minute
-    // market ticks are noisy enough that a raw line reads as jagged/hard to
-    // follow. nearestRate() lookups for a booking's reference rate and the
-    // hourly tick labels both read from rateLineAll (unsmoothed), so this
-    // only affects what's drawn, never a number shown anywhere.
-    return smoothSeries(windowed, 5)
-  }, [rateLineAll])
-
-  // The market rate's "reflection every hour" — one reference point per
-  // hour from 9 AM to 9 PM, shown under the matching XAxis tick.
+  // The chart's reference line is one snapshot per hour (9 AM–9 PM), not
+  // every raw tick — the feed itself is polled once a minute, which reads as
+  // noisy zigzag at that resolution and isn't a meaningful "the rate moved"
+  // signal. This same hourly snapshot is what bookings are compared against
+  // and what's shown under the matching XAxis tick.
   const hourlyPoints = useMemo(() => (
     HOUR_TICKS
       .map(minutes => ({ minutes, rate: nearestRate(rateLineAll, minutes) }))
@@ -3237,25 +3216,25 @@ function BookingRateChart({ t, card, date, bookings }) {
       .map(b => ({ ...b, minutes: toDayMinutes(b.created_at) }))
       .filter(b => b.minutes >= DAY_START_MIN && b.minutes <= DAY_END_MIN)
       .sort((a, b) => a.minutes - b.minutes)
-      .map(b => ({ ...b, refRate: nearestRate(rateLineAll, b.minutes), refRateLabel: rateField.label }))
+      .map(b => ({ ...b, refRate: nearestRate(hourlyPoints, b.minutes), refRateLabel: rateField.label }))
     return clusterBookings(withTime)
-  }, [bookings, rateLineAll, rateField])
+  }, [bookings, hourlyPoints, rateField])
 
   // Explicit Y domain covering both the rate line and the booking markers —
   // markers are a plain HTML overlay, not a chart series, so YAxis has
   // nothing of its own to auto-expand to booking rates outside the line's
   // range for the day.
   const yDomain = useMemo(() => {
-    const vals = [...rateLine.map(r => r.rate), ...clusters.map(c => c.rate)]
+    const vals = [...hourlyPoints.map(r => r.rate), ...clusters.map(c => c.rate)]
     if (!vals.length) return [0, 1]
     const min = Math.min(...vals), max = Math.max(...vals)
     const pad = Math.max(20, (max - min) * 0.12)
     return [Math.floor(min - pad), Math.ceil(max + pad)]
-  }, [rateLine, clusters])
+  }, [hourlyPoints, clusters])
 
   const avgRate = useMemo(
-    () => rateLine.length ? rateLine.reduce((s, r) => s + r.rate, 0) / rateLine.length : null,
-    [rateLine]
+    () => hourlyPoints.length ? hourlyPoints.reduce((s, r) => s + r.rate, 0) / hourlyPoints.length : null,
+    [hourlyPoints]
   )
 
   const loading = rateRows == null
@@ -3278,15 +3257,15 @@ function BookingRateChart({ t, card, date, bookings }) {
             ? (hovered.count > 1
                 ? `${hovered.count} bookings around ${fmtDateShort(date)}, ${fmtDayMinutes(hovered.minutes)} — click to view`
                 : `${fmtDateShort(date)}, ${fmtDayMinutes(hovered.minutes)} · ${hovered.members[0].party || 'Booking'} · ${fmt(hovered.members[0].weight)}g @ ₹${fmtNum(hovered.members[0].rate)}/g — click for full detail`)
-            : rateLine.length > 0
-              ? `${rateField.label} sell rate, ₹/g, 9 AM–9 PM · click a marker for full detail`
+            : hourlyPoints.length > 0
+              ? `${rateField.label} sell rate, hourly snapshot, 9 AM–9 PM · click a marker for full detail`
               : 'Market rate data unavailable for this day'}
         </div>
       </div>
 
       {loading ? (
         <div style={{ height: CHART_HEIGHT, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>Loading rate history…</div>
-      ) : clusters.length === 0 && rateLine.length === 0 ? (
+      ) : clusters.length === 0 && hourlyPoints.length === 0 ? (
         <div style={{ height: CHART_HEIGHT, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>No bookings or market data for this day (9 AM–9 PM)</div>
       ) : (
         <div ref={setWrapEl} style={{ position: 'relative', width: '100%', height: CHART_HEIGHT }}>
@@ -3314,11 +3293,11 @@ function BookingRateChart({ t, card, date, bookings }) {
                 <ReferenceLine y={avgRate} stroke={t.text4} strokeDasharray="4 3" strokeOpacity={0.6}
                   label={{ value: `avg ₹${fmtNum(Math.round(avgRate))}`, position: 'insideTopLeft', fill: t.text4, fontSize: 9 }} />
               )}
-              {rateLine.length > 1 && (
+              {hourlyPoints.length > 1 && (
                 <Area
-                  data={rateLine} dataKey="rate" type="monotone"
+                  data={hourlyPoints} dataKey="rate" type="monotone"
                   stroke={t.gold} strokeWidth={2.25} fill="url(#bookingRateFill)"
-                  dot={false} isAnimationActive={false}
+                  dot={{ r: 3, fill: t.gold, stroke: t.card, strokeWidth: 1.5 }} isAnimationActive={false}
                 />
               )}
             </ComposedChart>
