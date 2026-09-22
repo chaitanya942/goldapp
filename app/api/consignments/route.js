@@ -40,6 +40,8 @@ const CONSIGNMENT_ACTIVE_LIST_COLS = [
   'approved_at',
   'approved_by',
   'created_at',
+  'dispatched_at',
+  'received_at',
   'movement_type',
   'tmp_prf_no',
   'challan_no',
@@ -331,7 +333,7 @@ export async function GET(req) {
     // undefined → defaulted to interstate → wrong document path).
     let q = supabase
       .from('branches')
-      .select('id, name, state, region, cluster, model_type, address, city, pin_code, contact_person, contact_phone, branch_gstin, is_hub, hub_branch_name, pickup_time')
+      .select('id, name, state, region, cluster, model_type, address, city, pin_code, contact_person, contact_phone, branch_gstin, is_hub, hub_branch_name, pickup_time, delivery_tat_hours')
       .eq('is_active', true)
       .order('region')
       .order('name')

@@ -16,7 +16,7 @@ import { getCache, setCache } from '../../lib/moduleCache'
 import { CONSIGNMENT_THEMES as THEMES, REGION_COLORS, useMobile } from '../../lib/consignmentTheme'
 import { canActOnStep } from './workflowParts'
 import PreviewModal from './PreviewModal'
-import { istToday, istDaysAgo, istStartOfDayIso, istEndOfDayIso } from '../../lib/dateIst'
+import { istToday, istDaysAgo, istStartOfDayIso, istEndOfDayIso, istDateStr, addWorkingDaysSkipSunday } from '../../lib/dateIst'
 import { docFilename } from '../../lib/docFilename'
 import { appIdMatches } from '../../lib/appIdSearch'
 import { isCompanyEmail, COMPANY_MAIL_DOMAIN } from '../../lib/companyMail'
@@ -1313,6 +1313,7 @@ export default function ConsignmentData() {
                     { key: 'type',         label: 'Type',            align: 'left',  sortable: false },
                     { key: 'branch_name',  label: 'Source',          align: 'left',  sortable: true  },
                     { key: 'dest_branch',  label: 'Destination',     align: 'left',  sortable: false },
+                    { key: 'delivery_eta', label: 'Delivery ETA',    align: 'left',  sortable: false },
                     { key: 'total_bills',  label: 'Bills',           align: 'right', sortable: true  },
                     { key: 'total_net_wt', label: 'Net Wt',          align: 'right', sortable: true  },
                     { key: 'total_amount', label: 'Value',           align: 'right', sortable: true  },
@@ -1365,6 +1366,8 @@ export default function ConsignmentData() {
                     <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '110px' }} /></td>
                     {/* Destination */}
                     <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '90px' }} /></td>
+                    {/* Delivery ETA */}
+                    <td style={{ padding: '14px' }}><span className="cdata-skeleton" style={{ width: '80px' }} /></td>
                     {/* Bills */}
                     <td style={{ padding: '14px', textAlign: 'right' }}><span className="cdata-skeleton" style={{ width: '24px' }} /></td>
                     {/* Net Wt */}
@@ -1380,7 +1383,7 @@ export default function ConsignmentData() {
                   </tr>
                 ))
               ) : filteredCons.length === 0 ? (
-                <tr><td colSpan={10} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
+                <tr><td colSpan={11} style={{ padding: '64px', textAlign: 'center', color: t.text4, fontSize: '13px' }}>
                   {consignments.length === 0
                     ? 'No active consignments. Use Branch Stock → Move to create one.'
                     : 'No consignments match the filters'}
@@ -1416,6 +1419,8 @@ export default function ConsignmentData() {
                       {/* Source */}
                       <td />
                       {/* Destination */}
+                      <td />
+                      {/* Delivery ETA */}
                       <td />
                       {/* Bills */}
                       <td style={{ padding: '10px 14px', fontSize: '12px', color: t.text1, textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>{fmt(tot.bills)}</td>
@@ -1521,6 +1526,35 @@ export default function ConsignmentData() {
                     {/* Destination */}
                     <td style={{ padding: '11px 14px', fontSize: '12px', color: t.text2, whiteSpace: 'nowrap' }}>
                       {isType ? (c.dest_branch || '?') : 'Head Office'}
+                    </td>
+                    {/* Delivery ETA — projected arrival from the source branch's own
+                        transit TAT, same dispatch+TAT model bidding_volume uses to
+                        bucket inflight bills (see action=bidding_volume above). A
+                        draft consignment hasn't dispatched yet, so there's nothing
+                        to project from. */}
+                    <td style={{ padding: '11px 14px', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                      {(() => {
+                        if (c.status === 'cancelled' || c.approval_status === 'rejected') {
+                          return <span style={{ color: t.text4, fontStyle: 'italic' }}>—</span>
+                        }
+                        if (c.status === 'received') {
+                          return <span style={{ color: t.green, fontWeight: 600 }}>✓ Delivered {fmtDate(c.received_at)}</span>
+                        }
+                        if (!c.dispatched_at) {
+                          return <span style={{ color: t.text4, fontStyle: 'italic' }}>Pending dispatch</span>
+                        }
+                        const tat      = sourceBranchInfo?.delivery_tat_hours || 24
+                        const workDays = Math.max(1, Math.ceil(tat / 24))
+                        const etaDate  = addWorkingDaysSkipSunday(istDateStr(new Date(c.dispatched_at)), workDays)
+                        const overdue  = etaDate < istToday()
+                        const dueToday = etaDate === istToday()
+                        const color    = overdue ? t.red : dueToday ? t.gold : t.text2
+                        return (
+                          <span style={{ color, fontWeight: overdue || dueToday ? 700 : 400 }}>
+                            {overdue ? `Overdue · ${fmtDate(etaDate)}` : dueToday ? 'Due today' : fmtDate(etaDate)}
+                          </span>
+                        )
+                      })()}
                     </td>
                     <td className="cdata-num" style={{ padding: '11px 14px', fontSize: '12px', color: t.text2, textAlign: 'right' }}>{c.total_bills}</td>
                     <td className="cdata-num" style={{ padding: '11px 14px', fontSize: '12px', color: t.gold, textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, whiteSpace: 'nowrap' }}>{fmtWt(c.total_net_wt)}</td>
