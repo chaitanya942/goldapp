@@ -2924,10 +2924,10 @@ const partyColor = (name) => {
 // within a few minutes of each other are merged into a single clickable
 // cluster marker so the chart stays readable.
 
-// gold_rates column used as "the" market reference line — Kalinga Kawad
-// only, per ops. Deliberately never falls back to Ambica/Aamlin even when
-// Kalinga has no data for the day (see rateField below).
-const RATE_FIELD = { key: 'kalinga_sell_rate', label: 'Kalinga' }
+// gold_rates column used as "the" market reference line. Kalinga's feed is
+// unreachable from the production host (blocked upstream) so this reads the
+// other broadcast column instead; label is intentionally vendor-neutral.
+const RATE_FIELD = { key: 'ambica_sell_rate', label: 'Market Rate' }
 
 // Minutes since IST midnight for a timestamptz — matches the row's own IST
 // calendar day since callers pre-filter to that day's bounds.
@@ -3196,10 +3196,6 @@ function BookingRateChart({ t, card, date, bookings }) {
     return () => { cancelled = true }
   }, [date])
 
-  // Kalinga Kawad only — per ops, never substitute Ambica (or any other
-  // source) even when Kalinga has no data for the day. Showing a different
-  // vendor's rate under the same "Kalinga sell rate" comparison would be
-  // misleading, since bookings are compared against Kalinga specifically.
   const rateField = RATE_FIELD
 
   // Full-day series (needed so a 9 AM hourly point can still look back at

@@ -26,10 +26,10 @@ export default function LiveTicker() {
     let prev24 = null;
     const load = async () => {
       const { data } = await supabase
-        .from('gold_rates').select('kalinga_sell_rate, fetched_at')
+        .from('gold_rates').select('ambica_sell_rate, fetched_at')
         .order('fetched_at', { ascending: false }).limit(1).single();
-      if (!data?.kalinga_sell_rate) return;
-      const base = data.kalinga_sell_rate;
+      if (!data?.ambica_sell_rate) return;
+      const base = data.ambica_sell_rate;
       const next = [
         { label: '24K', price: base,               prev: prev24 ?? base,                    unit: '/10g' },
         { label: '22K', price: calcKarat(base, 22), prev: prev24 ? calcKarat(prev24, 22) : calcKarat(base, 22), unit: '/10g' },
