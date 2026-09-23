@@ -3014,13 +3014,11 @@ function makeScales(chartWidth, yDomain) {
 // Two-line XAxis tick — the hour, and directly below it that hour's rate —
 // so the market rate's "reflection every hour" reads at a glance alongside
 // the line, without a separate interactive layer.
-function HourTick({ x, y, payload, t, hourlyPoints }) {
-  const hp = hourlyPoints.find(p => p.minutes === payload.value)
+function HourTick({ x, y, payload, t }) {
   return (
     <g transform={`translate(${x},${y})`}>
       <circle cy={-2} r={1.5} fill={t.gold} fillOpacity={0.5} />
       <text dy={11} textAnchor="middle" fontSize={9.5} fontWeight={600} fill={t.text3}>{fmtDayMinutes(payload.value)}</text>
-      {hp && <text dy={23} textAnchor="middle" fontSize={8.5} fontWeight={600} fill={t.gold} fillOpacity={0.75}>₹{fmtNum(Math.round(hp.rate))}</text>}
     </g>
   )
 }
@@ -3281,7 +3279,7 @@ function BookingRateChart({ t, card, date, bookings }) {
               <XAxis
                 type="number" dataKey="minutes" domain={[DAY_START_MIN, DAY_END_MIN]}
                 ticks={HOUR_TICKS} height={X_AXIS_HEIGHT}
-                tick={(props) => <HourTick {...props} t={t} hourlyPoints={hourlyPoints} />}
+                tick={(props) => <HourTick {...props} t={t} />}
                 axisLine={{ stroke: t.border }} tickLine={false}
               />
               <YAxis
