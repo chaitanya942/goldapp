@@ -3032,7 +3032,7 @@ function BookingMarkersOverlay({ t, clusters, chartWidth, yDomain, selected, hov
         const cy = scale.y(c.rate)
         if (!Number.isFinite(cx) || !Number.isFinite(cy)) return null
         const anyActive = c.members.some(m => m.status !== 'cancelled')
-        const color = c.count > 1 ? t.blue : (STATUS_META[c.members[0].status]?.color || t.gold)
+        const color = t.blue
         const key = clusterKey(c)
         const isSelected = clusterKey(selected) === key
         const isHovered  = clusterKey(hovered) === key
@@ -3076,25 +3076,6 @@ function BookingMarkersOverlay({ t, clusters, chartWidth, yDomain, selected, hov
           </div>
         )
       })}
-    </div>
-  )
-}
-
-// Legend explaining marker colors — otherwise the status-coded dots (and the
-// blue "cluster" color) are uninterpretable at a glance.
-function BookingChartLegend({ t }) {
-  const items = [
-    ...Object.entries(STATUS_META).map(([, meta]) => meta),
-    { label: 'Multiple bookings', color: t.blue },
-  ]
-  return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${t.border}` }}>
-      {items.map(it => (
-        <div key={it.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: it.color, boxShadow: `0 0 4px ${it.color}80`, display: 'inline-block' }} />
-          <span style={{ fontSize: 10, color: t.text3 }}>{it.label}</span>
-        </div>
-      ))}
     </div>
   )
 }
@@ -3306,7 +3287,6 @@ function BookingRateChart({ t, card, date, bookings }) {
         </div>
       )}
 
-      {clusters.length > 0 && <BookingChartLegend t={t} />}
       {selected && <BookingDetailCard t={t} cluster={selected} date={date} onClose={() => setSelected(null)} />}
     </div>
   )
