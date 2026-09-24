@@ -2995,19 +2995,22 @@ const CHART_HEIGHT  = 220
 const CHART_MARGIN  = { top: 10, right: 16, bottom: 10, left: 4 }
 const Y_AXIS_WIDTH   = 50
 const X_AXIS_HEIGHT  = 34   // two-line tick: hour label + that hour's rate
-const DAY_START_MIN  = 9 * 60   // 9 AM
-const DAY_END_MIN    = 21 * 60  // 9 PM
-const HOUR_TICKS     = Array.from({ length: (DAY_END_MIN - DAY_START_MIN) / 60 + 1 }, (_, i) => DAY_START_MIN + i * 60)
+// Baseline business-hours window — widened per-day (see dayWindow below) to
+// cover any booking placed outside it, so an off-hours booking never
+// silently disappears from the chart while still showing in the list below.
+const DEFAULT_DAY_START_MIN = 9 * 60   // 9 AM
+const DEFAULT_DAY_END_MIN   = 21 * 60  // 9 PM
 
-function makeScales(chartWidth, yDomain) {
+function makeScales(chartWidth, yDomain, dayStart, dayEnd) {
   const plotLeft   = CHART_MARGIN.left + Y_AXIS_WIDTH
   const plotRight  = Math.max(plotLeft + 1, chartWidth - CHART_MARGIN.right)
   const plotTop    = CHART_MARGIN.top
   const plotBottom = CHART_HEIGHT - CHART_MARGIN.bottom - X_AXIS_HEIGHT
   const [yMin, yMax] = yDomain
   const yRange = (yMax - yMin) || 1
+  const dayRange = (dayEnd - dayStart) || 1
   return {
-    x: (minutes) => plotLeft + ((minutes - DAY_START_MIN) / (DAY_END_MIN - DAY_START_MIN)) * (plotRight - plotLeft),
+    x: (minutes) => plotLeft + ((minutes - dayStart) / dayRange) * (plotRight - plotLeft),
     y: (rate) => plotTop + (1 - (rate - yMin) / yRange) * (plotBottom - plotTop),
   }
 }
@@ -3024,8 +3027,8 @@ function HourTick({ x, y, payload, t }) {
   )
 }
 
-function BookingMarkersOverlay({ t, clusters, chartWidth, yDomain, selected, hovered, setSelected, setHovered }) {
-  const scale = makeScales(chartWidth, yDomain)
+function BookingMarkersOverlay({ t, clusters, chartWidth, yDomain, dayStart, dayEnd, selected, hovered, setSelected, setHovered }) {
+  const scale = makeScales(chartWidth, yDomain, dayStart, dayEnd)
   return (
     <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
       {clusters.map((c) => {
@@ -3165,6 +3168,20 @@ function BookingRateChart({ t, card, date, bookings, bookingsLoading }) {
 
   const rateField = RATE_FIELD
 
+  // Chart window defaults to business hours (9 AM–9 PM) but widens (rounded
+  // out to the hour) to cover any booking placed outside it — a booking must
+  // never silently vanish from the chart just because it landed at, say,
+  // 9:07 PM, while the Bookings list below still shows it.
+  const { dayStart, dayEnd, hourTicks } = useMemo(() => {
+    const bookingMinutes = (bookings || [])
+      .filter(b => b.created_at)
+      .map(b => toDayMinutes(b.created_at))
+    const start = Math.floor(Math.min(DEFAULT_DAY_START_MIN, ...bookingMinutes) / 60) * 60
+    const end   = Math.ceil(Math.max(DEFAULT_DAY_END_MIN, ...bookingMinutes) / 60) * 60
+    const ticks = Array.from({ length: (end - start) / 60 + 1 }, (_, i) => start + i * 60)
+    return { dayStart: start, dayEnd: end, hourTicks: ticks }
+  }, [bookings])
+
   // Full day's raw ticks, kept only so the hourly snapshot below can find the
   // nearest actual quote when the exact top-of-hour minute has no row.
   const rateLineAll = useMemo(() => {
@@ -3179,26 +3196,26 @@ function BookingRateChart({ t, card, date, bookings, bookingsLoading }) {
       .map(r => ({ minutes: toDayMinutes(r.fetched_at), rate: r[rateField.key] / 10 }))
   }, [rateRows, rateField])
 
-  // The chart's reference line is one snapshot per hour (9 AM–9 PM), not
-  // every raw tick — the feed itself is polled once a minute, which reads as
-  // noisy zigzag at that resolution and isn't a meaningful "the rate moved"
+  // The chart's reference line is one snapshot per hour, not every raw
+  // tick — the feed itself is polled once a minute, which reads as noisy
+  // zigzag at that resolution and isn't a meaningful "the rate moved"
   // signal. This same hourly snapshot is what bookings are compared against
   // and what's shown under the matching XAxis tick.
   const hourlyPoints = useMemo(() => (
-    HOUR_TICKS
+    hourTicks
       .map(minutes => ({ minutes, rate: nearestRate(rateLineAll, minutes) }))
       .filter(p => p.rate != null)
-  ), [rateLineAll])
+  ), [rateLineAll, hourTicks])
 
   const clusters = useMemo(() => {
     const withTime = (bookings || [])
       .filter(b => b.created_at)
       .map(b => ({ ...b, minutes: toDayMinutes(b.created_at) }))
-      .filter(b => b.minutes >= DAY_START_MIN && b.minutes <= DAY_END_MIN)
+      .filter(b => b.minutes >= dayStart && b.minutes <= dayEnd)
       .sort((a, b) => a.minutes - b.minutes)
       .map(b => ({ ...b, refRate: nearestRate(hourlyPoints, b.minutes), refRateLabel: rateField.label }))
     return clusterBookings(withTime)
-  }, [bookings, hourlyPoints, rateField])
+  }, [bookings, hourlyPoints, rateField, dayStart, dayEnd])
 
   // Explicit Y domain covering both the rate line and the booking markers —
   // markers are a plain HTML overlay, not a chart series, so YAxis has
@@ -3269,8 +3286,8 @@ function BookingRateChart({ t, card, date, bookings, bookingsLoading }) {
               </defs>
               <CartesianGrid stroke={t.border} strokeOpacity={0.35} strokeDasharray="3 4" vertical={true} horizontal={true} />
               <XAxis
-                type="number" dataKey="minutes" domain={[DAY_START_MIN, DAY_END_MIN]}
-                ticks={HOUR_TICKS} height={X_AXIS_HEIGHT}
+                type="number" dataKey="minutes" domain={[dayStart, dayEnd]}
+                ticks={hourTicks} height={X_AXIS_HEIGHT}
                 tick={(props) => <HourTick {...props} t={t} />}
                 axisLine={{ stroke: t.border }} tickLine={false}
               />
@@ -3293,7 +3310,7 @@ function BookingRateChart({ t, card, date, bookings, bookingsLoading }) {
             </ComposedChart>
           </ResponsiveContainer>
           {chartWidth > 0 && clusters.length > 0 && (
-            <BookingMarkersOverlay t={t} clusters={clusters} chartWidth={chartWidth} yDomain={yDomain} selected={selected} hovered={hovered} setSelected={setSelected} setHovered={setHovered} />
+            <BookingMarkersOverlay t={t} clusters={clusters} chartWidth={chartWidth} yDomain={yDomain} dayStart={dayStart} dayEnd={dayEnd} selected={selected} hovered={hovered} setSelected={setSelected} setHovered={setHovered} />
           )}
         </div>
       )}
