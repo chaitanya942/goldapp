@@ -251,9 +251,18 @@ export default function ConsignmentData() {
   // List filters. filterRegions is a Set of region names — multi-select via
   // toggleable chips. dateFrom / dateTo bound created_at against IST calendar
   // days so "today" matches the operator's clock, not the server's.
+  //
+  // Default window is TODAY, not all-time — this list used to fetch every
+  // active consignment ever created (unbounded backlog), which was the
+  // actual source of the page's slow load. Scoping the default to today
+  // (see fetchAll/refreshConsignmentsList below, which now send date_from/
+  // date_to to the server) cuts that down to a same-day slice. Anything
+  // still awaiting an accounts decision surfaces regardless of this window
+  // (server-side union on approval_status='pending') so switching to Today
+  // can never hide something ops still needs to act on.
   const [filterRegions, setFilterRegions] = useState(() => new Set())
-  const [dateFrom,      setDateFrom]      = useState('')
-  const [dateTo,        setDateTo]        = useState('')
+  const [dateFrom,      setDateFrom]      = useState(() => istToday())
+  const [dateTo,        setDateTo]        = useState(() => istToday())
   // Sortable columns. Default: newest first by created_at.
   const [sortKey, setSortKey] = useState('created_at')
   const [sortDir, setSortDir] = useState(-1)  // -1 desc, 1 asc
@@ -276,12 +285,24 @@ export default function ConsignmentData() {
   // button; the server auto-approves on success (mirrors the EWB pattern).
   const [einvoiceModal, setEinvoiceModal] = useState(null)
 
+  // date_from/date_to bound the server query to the active window (IST
+  // calendar days) — omitted entirely for the "All" preset (both empty).
+  // The server unions in anything still approval_status='pending' regardless
+  // of this window, so a narrower default can't hide work ops still owes a
+  // decision on.
+  const consignmentsListUrl = useCallback(() => {
+    const params = new URLSearchParams({ action: 'consignments', view: 'active_list' })
+    if (dateFrom) params.set('date_from', istStartOfDayIso(dateFrom))
+    if (dateTo)   params.set('date_to',   istEndOfDayIso(dateTo))
+    return `/api/consignments?${params}`
+  }, [dateFrom, dateTo])
+
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
     const [p, b, c, u] = await Promise.all([
       authedFetch('/api/consignments?action=stock_in_branch').then(r => r.json()),
       authedFetch('/api/consignments?action=branches').then(r => r.json()),
-      authedFetch('/api/consignments?action=consignments&view=active_list').then(r => r.json()),
+      authedFetch(consignmentsListUrl()).then(r => r.json()),
       authedFetch('/api/consignments?action=unknown_branches').then(r => r.json()),
     ])
     setPurchases(p.data || [])
@@ -299,32 +320,51 @@ export default function ConsignmentData() {
       unknownBranches: u.data || [],
     })
     if (!silent) setLoading(false)
-  }, [])
+  }, [consignmentsListUrl])
 
   // Lightweight post-action refresh: after create / EWB / E-Invoice generation
   // only the consignment list needs to update (branch stock, the branch master
   // and unknown-branches are unaffected). Fetch ONLY action=consignments, apply
   // the SAME active-row filter as fetchAll (shared helper), and patch just the
-  // consignments slice of the cache so the other cached datasets survive.
+  // consignments slice of the cache so the other cached datasets survive. Also
+  // the handler for the date-filter itself changing (see effect below) — a
+  // narrower/wider window is a re-fetch, not a client-side re-filter, now that
+  // the server does the date bounding.
   const refreshConsignmentsList = useCallback(async () => {
-    const c = await authedFetch('/api/consignments?action=consignments&view=active_list').then(r => r.json())
+    const c = await authedFetch(consignmentsListUrl()).then(r => r.json())
     const filteredConsignments = filterActiveConsignments(c.data)
     setConsignments(filteredConsignments)
     const prev = getCache('cd:fetchAll') || {}
     setCache('cd:fetchAll', { ...prev, consignments: filteredConsignments })
-  }, [])
+  }, [consignmentsListUrl])
 
   // Render the bill picker immediately (don't block on sync). In parallel,
   // force a fresh CRM→Supabase sync so any just-approved bills land. When
   // it resolves, refetch silently to surface them. Previously fetchAll
   // waited for sync to complete — adding 1–3s to the page open.
+  //
+  // Mount-only — deliberately NOT keyed on fetchAll (which now changes
+  // identity whenever the date filter changes) so switching a date chip
+  // doesn't re-fetch stock_in_branch/branches/unknown_branches or re-fire
+  // the CRM sync. The effect below handles date-filter changes instead.
+  const fetchAllRef = useRef(fetchAll)
+  useEffect(() => { fetchAllRef.current = fetchAll })
   useEffect(() => {
-    // If we already painted from cache, refresh silently — don't flip the
-    // screen back to a spinner just because a re-open kicked a refetch.
     const haveCache = !!getCache('cd:fetchAll')
-    fetchAll(haveCache)
-    triggerSync({ minIntervalMs: 0 }).then(res => { if (res) fetchAll(true) })
-  }, [fetchAll])
+    fetchAllRef.current(haveCache)
+    triggerSync({ minIntervalMs: 0 }).then(res => { if (res) fetchAllRef.current(true) })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Date filter changed (chip or custom range) after the initial load — the
+  // server now does the date bounding, so this is a lightweight re-fetch of
+  // just the consignments list, not a client-side re-filter of an already
+  // fully-loaded dataset.
+  const didMountConsignments = useRef(false)
+  useEffect(() => {
+    if (!didMountConsignments.current) { didMountConsignments.current = true; return }
+    refreshConsignmentsList()
+  }, [dateFrom, dateTo, refreshConsignmentsList])
 
   // Mirror the latest consignments into a ref so the realtime handler can read
   // the PREVIOUS row without re-subscribing on every list change.
@@ -850,8 +890,16 @@ export default function ConsignmentData() {
     // Date range bounds c.created_at against IST calendar days. Uses
     // istStartOfDayIso/istEndOfDayIso so the from/to inputs (YYYY-MM-DD) get
     // converted to UTC instants at IST midnight, not server-local midnight.
-    if (dateFrom && c.created_at && c.created_at < istStartOfDayIso(dateFrom)) return false
-    if (dateTo   && c.created_at && c.created_at > istEndOfDayIso(dateTo))     return false
+    // Mirrors the server's own date_from/date_to bounding (consignmentsListUrl
+    // above) — this is a no-op re-filter of an already-scoped result set in
+    // the normal case, EXCEPT for a pending-approval row: the server always
+    // includes those regardless of the window, so the client must exempt them
+    // here too or it would immediately hide the very thing the server just
+    // went out of its way to surface.
+    if (c.approval_status !== 'pending') {
+      if (dateFrom && c.created_at && c.created_at < istStartOfDayIso(dateFrom)) return false
+      if (dateTo   && c.created_at && c.created_at > istEndOfDayIso(dateTo))     return false
+    }
     if (search && !nav) {
       const q = search.toLowerCase()
       if (![c.tmp_prf_no, c.challan_no, c.branch_name, c.dest_branch].some(v => (v || '').toLowerCase().includes(q))) return false
@@ -1209,8 +1257,10 @@ export default function ConsignmentData() {
           Bottom: type chips + multi-select region chips + clear + count. */}
       {(() => {
         const allRegions = [...new Set(branches.map(b => b.region).filter(Boolean))].sort()
-        const hasFilters = filterRegions.size > 0 || search || dateFrom || dateTo
         const today = istToday()
+        // Today is the resting default now (not All) — only count the date
+        // range as an active filter when it's been moved off that default.
+        const hasFilters = filterRegions.size > 0 || !!search || !(dateFrom === today && dateTo === today)
         const datePresetActive =
           dateFrom === today && dateTo === today                ? 'today'
           : dateFrom === istDaysAgo(1) && dateTo === istDaysAgo(1) ? 'yesterday'
@@ -1291,7 +1341,7 @@ export default function ConsignmentData() {
                 style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '6px 8px', fontSize: '11px', color: t.text2, outline: 'none', colorScheme: 'dark' }} />
             </div>
             {hasFilters && (
-              <button onClick={() => { setFilterRegions(new Set()); setSearch(''); setDateFrom(''); setDateTo('') }}
+              <button onClick={() => { setFilterRegions(new Set()); setSearch(''); setDateFrom(today); setDateTo(today) }}
                 style={{ ...btnOut, padding: '5px 11px', fontSize: '11px' }}>Clear all</button>
             )}
           </div>

@@ -2964,8 +2964,19 @@ export async function GET(req) {
         .order('created_at', { ascending: false })
       if (status)   q = q.eq('status', status)
       if (branch)   q = q.eq('branch_name', branch)
-      if (dateFrom) q = q.gte('created_at', dateFrom)
-      if (dateTo)   q = q.lte('created_at', dateTo)
+      if (view === 'active_list' && (dateFrom || dateTo)) {
+        // Consignment Data defaults its date filter to Today for load speed
+        // (see ConsignmentData.js) — but a row still awaiting an accounts
+        // decision must never disappear just because it falls outside that
+        // window, so it's unioned back in regardless of date here.
+        const bounds = []
+        if (dateFrom) bounds.push(`created_at.gte.${dateFrom}`)
+        if (dateTo)   bounds.push(`created_at.lte.${dateTo}`)
+        q = q.or(`and(${bounds.join(',')}),approval_status.eq.pending`)
+      } else {
+        if (dateFrom) q = q.gte('created_at', dateFrom)
+        if (dateTo)   q = q.lte('created_at', dateTo)
+      }
       // Region scoping: a regional user only sees consignments dispatched FROM their region's branches.
       if (allowedBranches) q = q.in('branch_name', allowedBranches)
       return q
