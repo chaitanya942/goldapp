@@ -2428,6 +2428,7 @@ export default function BiddingVolume() {
             t={t} card={card}
             date={bookingsDate}
             bookings={tabBookings}
+            bookingsLoading={loading}
           />
           <BookingsList
             t={t} card={card}
@@ -3126,7 +3127,7 @@ function BookingDetailCard({ t, cluster, date, onClose }) {
 
 const clusterKey = (c) => c ? c.members.map(m => m.id).join(',') : null
 
-function BookingRateChart({ t, card, date, bookings }) {
+function BookingRateChart({ t, card, date, bookings, bookingsLoading }) {
   const [rateRows, setRateRows] = useState(null)   // null = loading
   const [selected, setSelected] = useState(null)   // clicked cluster
   const [hovered,  setHovered]  = useState(null)   // hovered cluster
@@ -3216,7 +3217,14 @@ function BookingRateChart({ t, card, date, bookings }) {
     [hourlyPoints]
   )
 
-  const loading = rateRows == null
+  // bookingsLoading covers the OTHER half of this chart's data — the booking
+  // markers, which come from the `bookings` prop and are refetched by the
+  // parent whenever `date` changes. Without this, the rate line (this
+  // component's own fast fetch) would finish and redraw for the new day
+  // while the markers were still whatever the PREVIOUS day's bookings were,
+  // since the parent's fetch is slower and this component has no visibility
+  // into it otherwise.
+  const loading = rateRows == null || bookingsLoading
 
   return (
     <div style={{ ...card, padding: '16px 18px', marginBottom: 14, background: `linear-gradient(180deg, ${t.gold}08, transparent 40%), ${t.card}` }}>
@@ -3243,7 +3251,10 @@ function BookingRateChart({ t, card, date, bookings }) {
       </div>
 
       {loading ? (
-        <div style={{ height: CHART_HEIGHT, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>Loading rate history…</div>
+        <div style={{ height: CHART_HEIGHT, display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>
+          <GoldSpinner size={26} />
+          <span>Loading {fmtDateShort(date)}…</span>
+        </div>
       ) : clusters.length === 0 && hourlyPoints.length === 0 ? (
         <div style={{ height: CHART_HEIGHT, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.text4, fontSize: 12 }}>No bookings or market data for this day (9 AM–9 PM)</div>
       ) : (
