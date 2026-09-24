@@ -145,6 +145,15 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
+  // TEMP timing instrumentation — ops reported sends "taking too long" with no
+  // way to tell which stage (doc generation vs. domain checks vs. SMTP) is
+  // actually the slow one. One JSON line per send, timings only (no PII).
+  // Remove once the real bottleneck is confirmed and addressed.
+  const _t0 = Date.now()
+  let _tLast = _t0
+  const _timings = {}
+  const _mark = (label) => { const now = Date.now(); _timings[label] = now - _tLast; _tLast = now }
+
   const auth = await requireAuth(req, { requiredRoles: null })
   if (!auth.ok) return auth.response
   if (!mailConfigured()) {
@@ -185,12 +194,17 @@ export async function POST(req) {
   if (!isCompanyEmail(to)) {
     return Response.json({ error: `"${to}" is not a ${COMPANY_MAIL_DOMAIN} address — check the branch email for a typo (e.g. "${COMPANY_MAIL_DOMAIN}" vs a look-alike).`, code: 'BAD_DOMAIN' }, { status: 400 })
   }
-  //   (A) the recipient + every Cc domain must actually exist / accept mail.
-  const toDom = await checkRecipientDomain(to)
-  if (!toDom.ok) return Response.json({ error: `Can't send — ${toDom.reason}. Fix the branch email and try again.`, code: 'BAD_DOMAIN' }, { status: 400 })
-  for (const e of ccList) {
-    const cd = await checkRecipientDomain(e)
-    if (!cd.ok) return Response.json({ error: `Cc "${e}" — ${cd.reason}.`, code: 'BAD_DOMAIN' }, { status: 400 })
+  // (A) every Cc domain must actually exist / accept mail — `to` is skipped
+  // here since isCompanyEmail() above already pins it to our own mail domain,
+  // which obviously has working MX (every @whitegold.money mailbox depends on
+  // it). A live DNS lookup for that same known-good domain on every single
+  // send was pure added latency for zero benefit. Cc addresses are operator-
+  // typed free text, so they still get checked, and in parallel rather than
+  // one-DNS-round-trip-at-a-time.
+  const ccChecks = await Promise.all(ccList.map(e => checkRecipientDomain(e)))
+  const badCc = ccChecks.findIndex(cd => !cd.ok)
+  if (badCc !== -1) {
+    return Response.json({ error: `Cc "${ccList[badCc]}" — ${ccChecks[badCc].reason}.`, code: 'BAD_DOMAIN' }, { status: 400 })
   }
 
   // Regenerate the three docs via the existing routes (auth forwarded).
@@ -198,17 +212,18 @@ export async function POST(req) {
   // an internal address); fall back to the request origin in dev.
   const origin  = (process.env.NEXT_PUBLIC_SITE_URL || new URL(req.url).origin).replace(/\/+$/, '')
   const authHdr = req.headers.get('authorization') || ''
-  const fetchDoc = async (path, contentType, filename) => {
+  const fetchDoc = async (path, contentType, filename, timingLabel) => {
     // Bound the self-fetch so a hung generator surfaces as a real error rather
     // than hanging the whole send on "Sending…" forever (maxDuration is 60s).
     const ac = new AbortController()
     const timer = setTimeout(() => ac.abort(), 45000)
+    const dt0 = Date.now()
     let res
     try {
       res = await fetch(`${origin}${path}`, { headers: { authorization: authHdr }, signal: ac.signal })
     } catch (e) {
       throw new Error(`${filename}: ${e?.name === 'AbortError' ? 'document generation timed out' : (e?.message || 'fetch failed')}`)
-    } finally { clearTimeout(timer) }
+    } finally { clearTimeout(timer); _timings[timingLabel] = Date.now() - dt0 }
     if (!res.ok) {
       let msg = `${res.status}`
       try { msg = (await res.json())?.error || msg } catch {}
@@ -217,25 +232,34 @@ export async function POST(req) {
     return { filename, content: Buffer.from(await res.arrayBuffer()), contentType }
   }
 
+  _mark('setup')   // auth + body parse + context load + validation + domain checks
+
   let attachments
   try {
     // All three in PARALLEL — the button only enables once every step is already
     // generated, so the workflow gate is satisfied and ordering no longer
     // matters. This is the main latency win: build time drops from the sum of
-    // the three round-trips to the slowest single one.
+    // the three round-trips to the slowest single one. Each is timed
+    // individually (doc_report_ms etc.) so a slow one is identifiable even
+    // though they overlap — the wall-clock 'build_docs' mark below only tells
+    // you the SLOWEST of the three, not which.
     attachments = await Promise.all([
       fetchDoc(`/api/generate-consignee-report?id=${id}`, 'image/jpeg',
-        docFilename({ consignment: c, branch, docType: 'report', ext: 'jpg' })),
+        docFilename({ consignment: c, branch, docType: 'report', ext: 'jpg' }), 'doc_report_ms'),
       fetchDoc(
         a.isInternal ? `/api/generate-issue-voucher-pdf?id=${id}` : `/api/generate-challan-pdf?id=${id}`,
         'application/pdf',
-        docFilename({ consignment: c, branch, docType: a.isInternal ? 'voucher' : 'challan', ext: 'pdf' })),
+        docFilename({ consignment: c, branch, docType: a.isInternal ? 'voucher' : 'challan', ext: 'pdf' }),
+        a.isInternal ? 'doc_voucher_ms' : 'doc_challan_ms'),
       fetchDoc(
         a.gstKind === 'ewb' ? `/api/eway-bill/pdf?id=${id}` : `/api/e-invoice/pdf?id=${id}`,
         'application/pdf',
-        docFilename({ consignment: c, branch, docType: a.gstKind === 'ewb' ? 'ewb' : 'einvoice', ext: 'pdf' })),
+        docFilename({ consignment: c, branch, docType: a.gstKind === 'ewb' ? 'ewb' : 'einvoice', ext: 'pdf' }),
+        a.gstKind === 'ewb' ? 'doc_ewb_ms' : 'doc_einvoice_ms'),
     ])
   } catch (e) {
+    _mark('build_docs')
+    console.log('[email-documents] timings (failed at build_docs)', JSON.stringify({ id, ..._timings, total_ms: Date.now() - _t0 }))
     // Persist the reason so it can be diagnosed without server logs.
     try {
       await logConsignmentEvent(admin, {
@@ -246,6 +270,7 @@ export async function POST(req) {
     } catch {}
     return Response.json({ error: `Could not build the documents — ${e.message}`, code: 'BUILD_FAILED' }, { status: 502 })
   }
+  _mark('build_docs')
 
   const dest = a.isInternal ? (c.dest_branch || 'Hub') : 'Head Office'
   const wt   = c.total_gross_wt != null ? `${Number(c.total_gross_wt).toFixed(3)} g` : '—'
@@ -280,6 +305,8 @@ export async function POST(req) {
 
   try {
     const info = await sendMail({ to, cc: ccList.length ? ccList : undefined, subject, html, attachments, fromName: senderName, replyTo: senderEmail })
+    _mark('smtp_send')
+    console.log('[email-documents] timings', JSON.stringify({ id, ..._timings, total_ms: Date.now() - _t0 }))
     // Record the send so the modal can tell ops it was already emailed (and by
     // whom / when) — while still allowing a resend. Best-effort; never blocks.
     await logConsignmentEvent(admin, {
@@ -301,6 +328,8 @@ export async function POST(req) {
     } catch (e) { console.warn('[email-documents] column stamp failed:', e?.message) }
     return Response.json({ ok: true, sent_to: to, cc: ccList, from_name: senderName, reply_to: senderEmail || null, attachments: attachments.map(x => x.filename), messageId: info.messageId })
   } catch (e) {
+    _mark('smtp_send')
+    console.log('[email-documents] timings (failed at smtp_send)', JSON.stringify({ id, ..._timings, total_ms: Date.now() - _t0 }))
     // Persist the exact SMTP error (code + message) so the failure can be
     // diagnosed from the activity log without needing server logs.
     try {
