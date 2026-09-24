@@ -3678,6 +3678,12 @@ export async function POST(req) {
     const ccPhone = (typeof body.branch_contact_phone === 'string') ? body.branch_contact_phone.trim().slice(0, 24) : ''
     if (ccName)  postCreatePatch.branch_contact_name  = ccName
     if (ccPhone) postCreatePatch.branch_contact_phone = ccPhone
+    // Destination-side contact — record-keeping only (see ConsignmentData.js's
+    // destContactName comment for why this never touches a printed document).
+    const dcName  = (typeof body.dest_contact_name  === 'string') ? body.dest_contact_name.trim().slice(0, 80) : ''
+    const dcPhone = (typeof body.dest_contact_phone === 'string') ? body.dest_contact_phone.trim().slice(0, 24) : ''
+    if (dcName)  postCreatePatch.dest_contact_name  = dcName
+    if (dcPhone) postCreatePatch.dest_contact_phone = dcPhone
 
     supabase.from('consignments')
       .update(postCreatePatch)

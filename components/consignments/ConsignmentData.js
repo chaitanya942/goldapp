@@ -95,6 +95,33 @@ function AgeBadge({ days, t }) {
   return <span style={{ fontSize: '10px', color, background: `${color}18`, borderRadius: '5px', padding: '2px 7px', fontWeight: 700, letterSpacing: '.02em' }}>{days}d</span>
 }
 
+// Employee-directory quick-fill for a contact Name/Phone pair. Deliberately
+// NOT a hard replacement for the free-text inputs — a real fraction of
+// branches have no synced employee records at all (see carrierName's own
+// comment), so a strict dropdown would block consignment creation there.
+// This just pre-fills the two text fields on pick; they stay directly
+// editable either way. Resets to the placeholder after each pick since the
+// text inputs, not this select, are the actual source of truth.
+function EmployeeQuickFill({ t, employees, onPick }) {
+  if (!employees.length) return null
+  return (
+    <select
+      defaultValue=""
+      onChange={e => {
+        const emp = employees.find(x => x.id === e.target.value)
+        if (emp) onPick(emp)
+        e.target.value = ''
+      }}
+      style={{ width: '100%', marginBottom: '6px', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '10px 12px', fontSize: '11.5px', color: t.text3, outline: 'none', boxSizing: 'border-box' }}
+    >
+      <option value="">Quick-fill from employee directory…</option>
+      {employees.map(e => (
+        <option key={e.id} value={e.id}>{e.name}{e.designation ? ` — ${e.designation}` : ''}</option>
+      ))}
+    </select>
+  )
+}
+
 // Active = in-flight rows + accounts-rejected rows (so ops can see the
 // pushback + reason). Hide:
 //   - seed templates
@@ -209,6 +236,16 @@ export default function ConsignmentData() {
   // Voucher prints. Null/empty → fall back to branch defaults at generation.
   const [branchContactName,   setBranchContactName]  = useState('')
   const [branchContactPhone,  setBranchContactPhone] = useState('')
+  // Destination-side counterpart — who at the hub/HO end is on record for this
+  // shipment. Record-keeping only (does NOT print on the Issue Voucher /
+  // Delivery Challan, unlike branchContactName above): stored on the
+  // consignment for later reference, e.g. in the activity log.
+  const [destContactName,     setDestContactName]    = useState('')
+  const [destContactPhone,    setDestContactPhone]   = useState('')
+  // Clear a picked destination contact whenever the destination itself changes
+  // (hub → HO, or one hub → another) — a name picked for the wrong destination
+  // is worse than an empty field.
+  useEffect(() => { setDestContactName(''); setDestContactPhone('') }, [destBranch, moveType])
   const [transporterMode,     setTransporterMode]    = useState('bvc')   // 'bvc' | 'branch_employee' | 'other'
   const [transporterOther,    setTransporterOther]   = useState('')
   // Self-carry (ROK / AP / TS): the branch employee who physically carries the
@@ -615,6 +652,10 @@ export default function ConsignmentData() {
           // to null so the PDF generator falls back to the live branch row.
           branch_contact_name:  branchContactName.trim()  || null,
           branch_contact_phone: branchContactPhone.trim() || null,
+          // Destination-side contact — record-keeping only, does not print
+          // on any document (see destContactName state comment).
+          dest_contact_name:  destContactName.trim()  || null,
+          dest_contact_phone: destContactPhone.trim() || null,
           transporter_name,
           transport_mode,
         }),
@@ -1122,19 +1163,18 @@ export default function ConsignmentData() {
                   const br = branches.find(b => b.name === nav?.branch)
                   setBranchContactName(br?.contact_person || '')
                   setBranchContactPhone(br?.contact_phone  || '')
+                  setDestContactName(''); setDestContactPhone('')
                   setTransporterMode('bvc'); setTransporterOther('')   // default each dispatch to BVC
                   setCarrierName('')
-                  // Suggestions for the self-carry carrier field. Fetched on
-                  // open rather than at mount so the directory isn't pulled for
-                  // operators who never create a consignment.
-                  if (isSelfCarryRegion(br?.region)) {
-                    authedFetch('/api/branch-employees')
-                      .then(r => r.json())
-                      .then(d => setBranchEmps(Array.isArray(d?.employees) ? d.employees : []))
-                      .catch(() => setBranchEmps([]))   // field stays free-text
-                  } else {
-                    setBranchEmps([])
-                  }
+                  // Employee directory — powers the quick-fill dropdowns on both
+                  // the source (Branch Contact) and destination (Destination
+                  // Contact) sides, plus the self-carry Carried-by suggestions.
+                  // Fetched on open rather than at mount so the directory isn't
+                  // pulled for operators who never create a consignment.
+                  authedFetch('/api/branch-employees')
+                    .then(r => r.json())
+                    .then(d => setBranchEmps(Array.isArray(d?.employees) ? d.employees : []))
+                    .catch(() => setBranchEmps([]))   // fields stay free-text
                   setShowModal(true)
                   fetchPreviewNumbers()
                 }} style={btnGold}>
@@ -2196,6 +2236,22 @@ export default function ConsignmentData() {
                                : isHubPicked ? t.purple
                                : t.text4
 
+              // Employee directory, scoped to the relevant branch on each
+              // side — source, and whichever destination is picked (a hub's
+              // own staff, or HO's, matched on either spelling synced from
+              // the CRM). Powers the quick-fill selects below.
+              const empsFor = (branchName) => {
+                if (!branchName) return []
+                const target = branchName.trim().toLowerCase()
+                return branchEmps.filter(e => e.name && (e.crm_branch_name || '').trim().toLowerCase() === target)
+              }
+              const srcEmps  = empsFor(nav?.branch)
+              const destEmps = isHubPicked
+                ? empsFor(destBranch)
+                : isExternal
+                  ? branchEmps.filter(e => e.name && ['ho', 'head office'].includes((e.crm_branch_name || '').trim().toLowerCase()))
+                  : []
+
               return (
                 <>
                   {/* Suggestion hint — only when we have a prior consignment
@@ -2372,6 +2428,8 @@ export default function ConsignmentData() {
                     <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
                       Branch Contact <span style={{ textTransform: 'none', fontWeight: 400, color: t.text4 }}>(prints on {moveType === 'INTERNAL' ? 'Issue Voucher' : 'Delivery Challan'})</span>
                     </div>
+                    <EmployeeQuickFill t={t} employees={srcEmps}
+                      onPick={emp => { setBranchContactName(emp.name); setBranchContactPhone(emp.contact_phone || emp.mobile_phone || '') }} />
                     <div style={{ display: 'flex', gap: '8px' }}>
                       <input
                         value={branchContactName}
@@ -2388,6 +2446,35 @@ export default function ConsignmentData() {
                       />
                     </div>
                   </div>
+
+                  {/* Destination Contact — record-keeping only, does NOT print
+                      on the Issue Voucher / Delivery Challan (unlike Branch
+                      Contact above). Only shown once a destination is picked,
+                      scoped to that hub's staff, or HO's when sending direct. */}
+                  {hasDestination && (
+                    <div>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
+                        Destination Contact <span style={{ textTransform: 'none', fontWeight: 400, color: t.text4 }}>(for our records — not printed)</span>
+                      </div>
+                      <EmployeeQuickFill t={t} employees={destEmps}
+                        onPick={emp => { setDestContactName(emp.name); setDestContactPhone(emp.contact_phone || emp.mobile_phone || '') }} />
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <input
+                          value={destContactName}
+                          onChange={e => setDestContactName(e.target.value)}
+                          placeholder="Name"
+                          style={{ flex: 1.4, minWidth: 0, background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '13px 15px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box' }}
+                        />
+                        <input
+                          value={destContactPhone}
+                          onChange={e => setDestContactPhone(e.target.value.replace(/[^\d+ ]/g, '').slice(0, 18))}
+                          placeholder="Phone"
+                          inputMode="tel"
+                          style={{ flex: 1, minWidth: 0, background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '13px 15px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace' }}
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   {/* Self-carry (ROK / AP / TS) INTERNAL movements: name the
                       branch employee carrying the parcel. Prints on the Issue
