@@ -14,6 +14,7 @@ import { useDashboardAuditLog } from '../../lib/useDashboardAuditLog'
 import LiveFeedFlashcards from './LiveFeedFlashcards'
 import MonthProjection from './MonthProjection'
 import TodaysBookingsWidget from './TodaysBookingsWidget'
+import BusinessCalendarInsight from './BusinessCalendarInsight'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const fmtDate = (iso) => { if (!iso) return ''; const [y,m,d] = iso.split('-'); return `${d}-${MONTHS[+m-1]}-${y}` }
@@ -1456,6 +1457,11 @@ export default function DashboardHome() {
 
       {/* ── LIVE RATES ── */}
       <LiveTicker />
+
+      {/* ── TODAY'S BUSINESS INSIGHT — Panchangam-aware selling-activity heads-up ── */}
+      <div style={{ marginTop: 14 }}>
+        <BusinessCalendarInsight t={t} />
+      </div>
 
       {/* ── LIVE FEED FLASHCARDS ──
             Gated by tab.purchase-data.live (matches Purchase Data → Live tab).
