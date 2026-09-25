@@ -242,12 +242,16 @@ export default function ConsignmentData() {
   // consignment for later reference, e.g. in the activity log.
   const [destContactName,     setDestContactName]    = useState('')
   const [destContactPhone,    setDestContactPhone]   = useState('')
-  // Clear a picked destination contact whenever the destination itself changes
-  // (hub → HO, or one hub → another) — a name picked for the wrong destination
-  // is worse than an empty field.
-  useEffect(() => { setDestContactName(''); setDestContactPhone('') }, [destBranch, moveType])
   const [transporterMode,     setTransporterMode]    = useState('bvc')   // 'bvc' | 'branch_employee' | 'other'
   const [transporterOther,    setTransporterOther]   = useState('')
+  // Clear a picked destination contact whenever it would no longer be shown —
+  // the destination changes (hub → HO, or one hub → another), or the
+  // transporter switches to BVC (a courier, not a named handover) — a stale
+  // name silently riding along in the payload is worse than an empty field.
+  useEffect(() => {
+    if (moveType === 'EXTERNAL' && transporterMode === 'bvc') { setDestContactName(''); setDestContactPhone('') }
+  }, [transporterMode, moveType])
+  useEffect(() => { setDestContactName(''); setDestContactPhone('') }, [destBranch, moveType])
   // Self-carry (ROK / AP / TS): the branch employee who physically carries the
   // parcel to the hub. Prints on the Issue Voucher. Suggestions come from the
   // branch_employees directory, but the field stays free-text — 15 of 22 Rest
@@ -2251,6 +2255,18 @@ export default function ConsignmentData() {
                 : isExternal
                   ? branchEmps.filter(e => e.name && ['ho', 'head office'].includes((e.crm_branch_name || '').trim().toLowerCase()))
                   : []
+              // Whoever's actually handling the shipment on the receiving end
+              // could be from either branch (e.g. a source employee riding
+              // along, or the destination's own staff picking up) — offer
+              // both directories in this one field.
+              const destContactEmps = [...srcEmps, ...destEmps]
+              // Destination Contact only makes sense when a PERSON is
+              // actually involved in the handover — a hub move always
+              // involves one (Carried by), but for a direct-to-HO move it's
+              // only relevant when a branch employee (not a BVC courier) is
+              // the transporter.
+              const showDestContact = hasDestination
+                && (isHubPicked || (isExternal && transporterMode !== 'bvc'))
 
               return (
                 <>
@@ -2449,14 +2465,18 @@ export default function ConsignmentData() {
 
                   {/* Destination Contact — record-keeping only, does NOT print
                       on the Issue Voucher / Delivery Challan (unlike Branch
-                      Contact above). Only shown once a destination is picked,
-                      scoped to that hub's staff, or HO's when sending direct. */}
-                  {hasDestination && (
+                      Contact above). Hidden for BVC (a courier, not a named
+                      employee handover) — shown for a hub move (always
+                      involves a Carried-by employee) or a direct-to-HO move
+                      with Branch Employee / Other as the transporter. Options
+                      pool both the source and destination directories, since
+                      whoever's actually handling it could be from either. */}
+                  {showDestContact && (
                     <div>
                       <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
                         Destination Contact <span style={{ textTransform: 'none', fontWeight: 400, color: t.text4 }}>(for our records — not printed)</span>
                       </div>
-                      <EmployeeQuickFill t={t} employees={destEmps}
+                      <EmployeeQuickFill t={t} employees={destContactEmps}
                         onPick={emp => { setDestContactName(emp.name); setDestContactPhone(emp.contact_phone || emp.mobile_phone || '') }} />
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <input
