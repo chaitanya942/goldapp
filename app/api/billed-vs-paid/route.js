@@ -26,6 +26,7 @@ import { createClient } from '@supabase/supabase-js'
 import { Client } from 'pg'
 import mysql from 'mysql2/promise'
 import { requireAuthForPage } from '../../../lib/apiAuth'
+import { newCrmSslForPg } from '../../../lib/newCrmPg'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -46,7 +47,7 @@ async function newCrmPayments(from, to) {
     host: process.env.NEW_CRM_DB_HOSTNAME || process.env.NEW_CRM_DB_HOST,
     port: parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
     database: process.env.NEW_CRM_DB_NAME, user: process.env.NEW_CRM_DB_USER, password: process.env.NEW_CRM_DB_PASSWORD,
-    ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 20000,
+    ssl: newCrmSslForPg(), connectionTimeoutMillis: 20000,
   })
   await client.connect()
   try {

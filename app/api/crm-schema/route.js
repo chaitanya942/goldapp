@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise'
 import postgres from 'postgres'
 import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
+import { newCrmOptsForPostgresPkg } from '../../../lib/newCrmPg'
 
 // Schema explorer — admin-only diagnostic. Exposes table layout + connection
 // state for both old MySQL CRM and new Postgres CRM.
@@ -94,16 +95,13 @@ export async function GET(req) {
   // ── NEW CRM (PostgreSQL) ───────────────────────────────────────────────────
   let sql
   try {
-    const sslOptions = process.env.NEW_CRM_DB_CA
-      ? { ca: process.env.NEW_CRM_DB_CA, rejectUnauthorized: true }
-      : { rejectUnauthorized: false }
     sql = postgres({
       host:     process.env.NEW_CRM_DB_HOSTNAME || process.env.NEW_CRM_DB_HOST,
       port:     parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
       database: process.env.NEW_CRM_DB_NAME,
       username: process.env.NEW_CRM_DB_USER,
       password: process.env.NEW_CRM_DB_PASSWORD,
-      ssl:      sslOptions,
+      ...newCrmOptsForPostgresPkg(),
       connect_timeout: 10,
       max: 1,
     })

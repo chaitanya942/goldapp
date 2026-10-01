@@ -13,6 +13,7 @@ import { createClient } from '@supabase/supabase-js'
 import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 import { aliasBranchName } from '../../../lib/crmBranchAlias'
 import { deriveBranchFields, autoBranchCode } from '../../../lib/branchDerive'
+import { newCrmSslForPg } from '../../../lib/newCrmPg'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -38,7 +39,7 @@ export async function POST(req) {
     client = new pg.Client({
       host: process.env.NEW_CRM_DB_HOST, port: parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
       database: process.env.NEW_CRM_DB_NAME, user: process.env.NEW_CRM_DB_USER, password: process.env.NEW_CRM_DB_PASSWORD,
-      ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 15000,
+      ssl: newCrmSslForPg(), connectionTimeoutMillis: 15000,
     })
     await client.connect()
     const { rows: crm } = await client.query(`SELECT name, address, city, pin, gstin FROM "Branch" WHERE name IS NOT NULL AND btrim(name) <> ''`)

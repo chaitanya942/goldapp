@@ -13,6 +13,7 @@
 
 import { Client } from 'pg'
 import { requireAuthForPage } from '../../../../lib/apiAuth'
+import { newCrmSslForPg } from '../../../../lib/newCrmPg'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -26,7 +27,7 @@ export async function GET(req) {
     host: process.env.NEW_CRM_DB_HOSTNAME || process.env.NEW_CRM_DB_HOST,
     port: parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
     database: process.env.NEW_CRM_DB_NAME, user: process.env.NEW_CRM_DB_USER, password: process.env.NEW_CRM_DB_PASSWORD,
-    ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 20000,
+    ssl: newCrmSslForPg(), connectionTimeoutMillis: 20000,
   })
 
   try {

@@ -1,6 +1,7 @@
 import pg from 'pg'
 import { createClient } from '@supabase/supabase-js'
 import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
+import { newCrmSslForPg } from '../../../lib/newCrmPg'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -31,7 +32,7 @@ export async function POST(req) {
     client = new pg.Client({
       host: process.env.NEW_CRM_DB_HOST, port: parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
       database: process.env.NEW_CRM_DB_NAME, user: process.env.NEW_CRM_DB_USER, password: process.env.NEW_CRM_DB_PASSWORD,
-      ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 20000,
+      ssl: newCrmSslForPg(), connectionTimeoutMillis: 20000,
     })
     await client.connect()
     const { rows: employees } = await client.query(`

@@ -1,5 +1,6 @@
 import pg from 'pg'
 import { requireAuth, ROLE_GROUPS } from '../../../../lib/apiAuth'
+import { newCrmSslForPg } from '../../../../lib/newCrmPg'
 
 // Live employee insights, computed straight from the NEW CRM (Employee +
 // Transaction + stage artifacts). Independent of the stored branch_employees
@@ -25,7 +26,7 @@ export async function GET(req) {
     client = new pg.Pool({
       host: process.env.NEW_CRM_DB_HOST, port: parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
       database: process.env.NEW_CRM_DB_NAME, user: process.env.NEW_CRM_DB_USER, password: process.env.NEW_CRM_DB_PASSWORD,
-      ssl: { rejectUnauthorized: false }, max: 6, connectionTimeoutMillis: 15000, idleTimeoutMillis: 8000,
+      ssl: newCrmSslForPg(), max: 6, connectionTimeoutMillis: 15000, idleTimeoutMillis: 8000,
     })
     client.on('error', () => {})
     const Q = (s) => client.query(s).then(r => r.rows)

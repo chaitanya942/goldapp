@@ -8,6 +8,7 @@
 
 import postgres from 'postgres'
 import { requireAuth } from '../../../lib/apiAuth'
+import { newCrmOptsForPostgresPkg } from '../../../lib/newCrmPg'
 
 // Small in-memory cache so multiple users polling every 30s share one DB hit.
 // Rates only change every few minutes at most, so a 15s TTL is generous.
@@ -17,16 +18,13 @@ let cache = null   // { data, ts }
 let sqlRef
 function getSql() {
   if (sqlRef) return sqlRef
-  const sslOptions = process.env.NEW_CRM_DB_CA
-    ? { ca: process.env.NEW_CRM_DB_CA, rejectUnauthorized: true }
-    : { rejectUnauthorized: false }
   sqlRef = postgres({
     host:     process.env.NEW_CRM_DB_HOSTNAME || process.env.NEW_CRM_DB_HOST,
     port:     parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
     database: process.env.NEW_CRM_DB_NAME,
     username: process.env.NEW_CRM_DB_USER,
     password: process.env.NEW_CRM_DB_PASSWORD,
-    ssl:      sslOptions,
+    ...newCrmOptsForPostgresPkg(),
     connect_timeout: 5,
     idle_timeout:    10,
     max:             2,

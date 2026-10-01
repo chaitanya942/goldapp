@@ -6,6 +6,7 @@ import postgres  from 'postgres'
 import { createClient } from '@supabase/supabase-js'
 import { requireAuth } from '../../../lib/apiAuth'
 import { aliasBranchName } from '../../../lib/crmBranchAlias'
+import { newCrmOptsForPostgresPkg } from '../../../lib/newCrmPg'
 
 const REGION_BYPASS_ROLES = new Set(['super_admin', 'founders_office', 'admin'])
 
@@ -201,16 +202,13 @@ export async function GET(req) {
       //    numbers.
       let ncCompleted = 0, ncCompletedNet = 0, ncCompletedGross = 0, ncCompletedValue = 0, ncLiveOk = false
       try {
-        const sslOpt = process.env.NEW_CRM_DB_CA
-          ? { ca: process.env.NEW_CRM_DB_CA, rejectUnauthorized: true }
-          : { rejectUnauthorized: false }
         const ncSql = postgres({
           host:     process.env.NEW_CRM_DB_HOSTNAME || process.env.NEW_CRM_DB_HOST,
           port:     parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
           database: process.env.NEW_CRM_DB_NAME,
           username: process.env.NEW_CRM_DB_USER,
           password: process.env.NEW_CRM_DB_PASSWORD,
-          ssl:      sslOpt, connect_timeout: 3, max: 1,
+          ...newCrmOptsForPostgresPkg(), connect_timeout: 3, max: 1,
         })
         try {
           const dayStart = `${todayIST}T00:00:00+05:30`
@@ -988,16 +986,13 @@ export async function GET(req) {
       let newCrmError = null
       let sql
       try {
-        const sslOptions = process.env.NEW_CRM_DB_CA
-          ? { ca: process.env.NEW_CRM_DB_CA, rejectUnauthorized: true }
-          : { rejectUnauthorized: false }
         sql = postgres({
           host:     process.env.NEW_CRM_DB_HOSTNAME || process.env.NEW_CRM_DB_HOST,
           port:     parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
           database: process.env.NEW_CRM_DB_NAME,
           username: process.env.NEW_CRM_DB_USER,
           password: process.env.NEW_CRM_DB_PASSWORD,
-          ssl:      sslOptions,
+          ...newCrmOptsForPostgresPkg(),
           connect_timeout: 3,
           max:      1,
         })

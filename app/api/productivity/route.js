@@ -26,6 +26,7 @@
 import mysql from 'mysql2/promise'
 import pg from 'pg'
 import { requireAuthForPage } from '../../../lib/apiAuth'
+import { newCrmSslForPg } from '../../../lib/newCrmPg'
 
 const CUTOVER = '2026-06-15'
 
@@ -41,7 +42,7 @@ function pgPool() {
     _pg = new pg.Pool({
       host: process.env.NEW_CRM_DB_HOST, port: parseInt(process.env.NEW_CRM_DB_PORT || '5432'),
       database: process.env.NEW_CRM_DB_NAME, user: process.env.NEW_CRM_DB_USER, password: process.env.NEW_CRM_DB_PASSWORD,
-      ssl: { rejectUnauthorized: false }, max: 6, keepAlive: true,
+      ssl: newCrmSslForPg(), max: 6, keepAlive: true,
       // NEW CRM kills idle sessions at 60s (idle_session_timeout). Close our
       // idle clients well before that so we never hand out a server-killed one.
       connectionTimeoutMillis: 10000, idleTimeoutMillis: 15000,

@@ -11,6 +11,7 @@
 
 import { Client } from 'pg'
 import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
+import { newCrmSslForPg } from '../../../lib/newCrmPg'
 
 export const runtime = 'nodejs'
 
@@ -47,7 +48,7 @@ export async function GET(req) {
     database: process.env.NEW_CRM_DB_NAME,
     user:     process.env.NEW_CRM_DB_USER,
     password: process.env.NEW_CRM_DB_PASSWORD,
-    ssl:      { rejectUnauthorized: false },
+    ssl:      newCrmSslForPg(),
     connectionTimeoutMillis: 8000,
   })
   const t0 = Date.now()
@@ -68,6 +69,8 @@ export async function GET(req) {
     ip_lookup_error: ipLookupError,
     new_crm_db: {
       host: process.env.NEW_CRM_DB_HOST || null,
+      port: process.env.NEW_CRM_DB_PORT || null,
+      pgbouncer_mode: process.env.NEW_CRM_DB_PGBOUNCER === 'true',
       connected,
       elapsed_ms: Date.now() - t0,
       db_time: dbTime,

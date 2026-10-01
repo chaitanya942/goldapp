@@ -4,6 +4,7 @@ import { NEW_CRM_LIVE_DATE } from '../../../lib/crmConfig'
 import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 import { aliasBranchName } from '../../../lib/crmBranchAlias'
 import { recordSyncSuccess, recordSyncFailure } from '../../../lib/syncHeartbeat'
+import { newCrmSslForPg } from '../../../lib/newCrmPg'
 
 const { Client } = pg
 
@@ -66,7 +67,7 @@ async function runSync(request) {
       database: process.env.NEW_CRM_DB_NAME,
       user:     process.env.NEW_CRM_DB_USER,
       password: process.env.NEW_CRM_DB_PASSWORD,
-      ssl:      { rejectUnauthorized: false },
+      ssl:      newCrmSslForPg(),
       connectionTimeoutMillis: 15000,
     })
     await client.connect()
