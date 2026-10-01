@@ -15,8 +15,18 @@ import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 export const runtime = 'nodejs'
 
 export async function GET(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
-  if (!auth.ok) return auth.response
+  // Admin session (normal in-app call) OR a shared secret as a query param —
+  // this is meant to be opened directly in a browser address bar, which
+  // can't attach the Bearer token authedFetch sends, so a pure session check
+  // would always 401 a manual check. Reuses CRON_SECRET (already set in
+  // Railway for the cron worker) rather than adding a new env var just for
+  // a temporary diagnostic.
+  const { searchParams } = new URL(req.url)
+  const hasSecret = !!process.env.CRON_SECRET && searchParams.get('key') === process.env.CRON_SECRET
+  if (!hasSecret) {
+    const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+    if (!auth.ok) return auth.response
+  }
 
   // What IP is this Railway instance's traffic leaving from right now? That's
   // exactly what needs to be on the RDS security group's inbound allowlist.
