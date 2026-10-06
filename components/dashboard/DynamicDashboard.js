@@ -17,6 +17,7 @@ import ConsignmentOverviewWidget from './ConsignmentOverviewWidget'
 import TodaysBookingsWidget from './TodaysBookingsWidget'
 import LiveFeedFlashcards from './LiveFeedFlashcards'
 import MonthProjection from './MonthProjection'
+import BusinessCalendarInsight from './BusinessCalendarInsight'
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 const MONTHS   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -447,6 +448,14 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+
+      {/* Today's Business Insight — unconditional, same as DashboardHome.js's
+          super_admin view. Not gated behind an element.dashboard.* permission:
+          this is general advisory context (not sensitive data), and gating it
+          would mean any role with pre-existing explicit element.dashboard.*
+          config silently never sees it until an admin opts it in — exactly
+          the kind of per-role gap that's easy to miss. */}
+      <BusinessCalendarInsight t={t} />
 
       {/* Period selector row */}
       {showPeriodSelector && (
