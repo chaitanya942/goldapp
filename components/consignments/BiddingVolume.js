@@ -698,6 +698,18 @@ export default function BiddingVolume() {
   const t48hBranches   = useMemo(() => t48hBranchesRaw.filter(b => b.region !== 'Kerala'),   [t48hBranchesRaw])
   const t72hBranches   = useMemo(() => t72hBranchesRaw.filter(b => b.region !== 'Kerala'),   [t72hBranchesRaw])
   const preEodBranches = useMemo(() => preEodBranchesRaw.filter(b => b.region !== 'Kerala'), [preEodBranchesRaw])
+  // supply.branch_pre_eod.total is the server's pickup-today sum across ALL
+  // eligible branches, Kerala hubs included (per the server comment: Section 7
+  // intentionally spans every non-Bangalore branch). But this tab drops Kerala
+  // rows entirely (Kerala has its own KL tab below) — so on a day where the
+  // only pickup-today stock happens to be at a Kerala hub, the nav pill showed
+  // a non-zero count while the detail view correctly rendered nothing, which
+  // read as a bug. Recompute the badge from the SAME Kerala-dropped list the
+  // detail view actually renders, so the two can never disagree.
+  const preEodTodayBillsKAAPTS = useMemo(
+    () => preEodBranches.filter(b => b.pickup_today).reduce((s, b) => s + (b.total_bills || 0), 0),
+    [preEodBranches]
+  )
   // Section 6 — booked but consignment not created (Red Flag). View-only;
   // server already partitions this to non-Kerala (KL has its own slice).
   const bookedPendBranches = useMemo(() => bookedPendRaw, [bookedPendRaw])
@@ -1818,7 +1830,7 @@ export default function BiddingVolume() {
           { id: '4', label: 'After 2 days · 72h',      accent: t72,                   bills: supply?.transit_72h?.total?.bills  || 0, date: dayAfter2ArrivalDate },
           { id: '5', label: 'Created · not booked',    accent: t.orange,              bills: (supply?.bangalore_pending_booking?.total?.bills || 0) + (supply?.consignment_pending_booking?.total?.bills || 0), date: null },
           { id: '6', label: 'Booked · no consignment', accent: t.red,                 bills: supply?.booked_pending_dispatch?.total?.bills || 0, date: null },
-          { id: '7', label: 'Branch pickup pending',   accent: t.orange,              bills: supply?.branch_pre_eod?.total?.bills || 0, date: arrivalDate },
+          { id: '7', label: 'Branch pickup pending',   accent: t.orange,              bills: preEodTodayBillsKAAPTS, date: arrivalDate },
         ]
         const baseChip = (active, accent) => ({
           display: 'flex', alignItems: 'center', gap: 7, padding: '6px 12px',
