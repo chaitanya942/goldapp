@@ -85,7 +85,7 @@ const T = {
     logoSdw: '0 2px 12px rgba(201,168,76,.3)',
   },
   light: {
-    side: '#f0ebe0', text1: '#1a1208', text3: '#7a6a4a', text4: '#a09070',
+    side: '#f0ebe0', text1: '#1a1208', text3: '#5c4e36', text4: '#a09070',
     gold: '#9a7228', goldDim: 'rgba(154,114,40,.1)', goldBdr: 'rgba(154,114,40,.22)',
     goldSdw: '0 0 8px rgba(154,114,40,.06), inset 0 1px 0 rgba(255,255,255,.5)',
     goldGlow: 'rgba(154,114,40,.4)', border: '#ddd8cc', border2: '#d0c8b8',

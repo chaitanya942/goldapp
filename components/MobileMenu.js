@@ -9,7 +9,7 @@ import { getVisibleModules, getVisibleAdmin } from '../lib/modules'
 const T = {
   dark: {
     bg: '#0c0b09', card: '#15140f', border: '#1e1e1a', text1: '#f0e6c8',
-    text2: '#c8b89a', text3: '#7a6a4a', text4: '#3a2a1a',
+    text2: '#c8b89a', text3: '#5c4e36', text4: '#3a2a1a',
     gold: '#c9a84c', goldDim: 'rgba(201,168,76,.1)', goldBdr: 'rgba(201,168,76,.2)',
     hov: 'rgba(201,168,76,.06)', red: '#e05555',
     avatarBg: 'linear-gradient(135deg, #c9a84c 0%, #7a4a10 100%)',
@@ -17,7 +17,7 @@ const T = {
   },
   light: {
     bg: '#f0ebe0', card: '#faf7f2', border: '#ddd8cc', text1: '#1a1208',
-    text2: '#3a2a10', text3: '#7a6a4a', text4: '#9a8a6a',
+    text2: '#3a2a10', text3: '#5c4e36', text4: '#7a6a52',
     gold: '#9a7228', goldDim: 'rgba(154,114,40,.08)', goldBdr: 'rgba(154,114,40,.2)',
     hov: 'rgba(154,114,40,.06)', red: '#c03030',
     avatarBg: 'linear-gradient(135deg, #b8882e 0%, #7a4a10 100%)',

@@ -16,7 +16,7 @@ function loadScript(src) {
 
 const THEMES = {
   dark:  { bg: '#0c0c0c', card: '#141414', card2: '#1a1a1a', text1: '#f0e6c8', text2: '#c8bda0', text3: '#8a7f66', gold: '#c9a84c', border: '#242424', green: '#3aaa6a', red: '#e05555', blue: '#3a8fbf', amber: '#e58a3b' },
-  light: { bg: '#f5f1e8', card: '#ffffff', card2: '#faf7f0', text1: '#1a1208', text2: '#4a3f28', text3: '#7a6a4a', gold: '#9a7228', border: '#e0dace', green: '#2a8a52', red: '#c23b3b', blue: '#2a6a9a', amber: '#b5661f' },
+  light: { bg: '#f5f1e8', card: '#ffffff', card2: '#faf7f0', text1: '#1a1208', text2: '#4a3f28', text3: '#5c4e36', gold: '#9a7228', border: '#e0dace', green: '#2a8a52', red: '#c23b3b', blue: '#2a6a9a', amber: '#b5661f' },
 }
 
 const REPORT_ROLES = ['super_admin', 'founders_office', 'admin', 'accounts']

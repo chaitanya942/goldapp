@@ -54,8 +54,8 @@ import SyncHealthNotifier from '../../components/consignments/SyncHealthNotifier
 import MeltingIncoming from '../../components/melting/MeltingIncoming'
 
 const THEMES = {
-  dark:  { bg: '#0a0a0a', card: '#111111', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', border: '#1e1e1e', red: '#e05555' },
-  light: { bg: '#f5f0e8', card: '#faf7f2', text1: '#1a1208', text2: '#3a2a10', text3: '#6a5a3a', text4: '#9a8a6a', gold: '#9a7228', border: '#e0dace', red: '#c03030' },
+  dark:  { bg: '#0a0a0a', card: '#111111', text1: '#f0e6c8', text2: '#c8b89a', text3: '#5c4e36', text4: '#4a3a2a', gold: '#c9a84c', border: '#1e1e1e', red: '#e05555' },
+  light: { bg: '#f5f0e8', card: '#faf7f2', text1: '#1a1208', text2: '#3a2a10', text3: '#6a5a3a', text4: '#7a6a52', gold: '#9a7228', border: '#e0dace', red: '#c03030' },
 }
 
 // "Operations" sidebar group's tab ids (see components/Sidebar.js NAV_ITEMS)

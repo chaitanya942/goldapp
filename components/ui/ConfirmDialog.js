@@ -5,7 +5,7 @@ import { useApp } from '../../lib/context'
 
 const T = {
   dark:  { bg: '#111', border: 'rgba(201,168,76,0.3)', text1: '#f0e6c8', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', red: '#e05555', green: '#3aaa6a', blue: '#3a8fbf', card2: '#1a1a1a', input: '#0d0d0d' },
-  light: { bg: '#faf7f2', border: 'rgba(154,114,40,0.4)', text1: '#1a1208', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#9a7228', red: '#c03030', green: '#2a8a5a', blue: '#2a6a9a', card2: '#ede5d8', input: '#fff' },
+  light: { bg: '#faf7f2', border: 'rgba(154,114,40,0.4)', text1: '#1a1208', text3: '#5c4e36', text4: '#7a6a52', gold: '#9a7228', red: '#c03030', green: '#2a8a5a', blue: '#2a6a9a', card2: '#ede5d8', input: '#fff' },
 }
 
 // Themed replacement for window.confirm() / window.prompt(). Returns a Promise

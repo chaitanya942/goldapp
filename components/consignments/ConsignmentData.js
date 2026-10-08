@@ -2236,7 +2236,10 @@ export default function ConsignmentData() {
               const destRegion = isExternal ? 'Bangalore (KA)'
                                : isHubPicked ? (branches.find(b => b.name === destBranch)?.region || '')
                                : ''
-              const destColor  = isExternal ? t.gold
+              // Head Office reads as plain dark/bold text (not the gold accent) —
+              // ops wanted it to read as the heaviest, darkest text on the card,
+              // not a secondary accent colour.
+              const destColor  = isExternal ? t.text1
                                : isHubPicked ? t.purple
                                : t.text4
 
@@ -2418,7 +2421,7 @@ export default function ConsignmentData() {
                         fontSize: '13px', fontWeight: 900, letterSpacing: '.03em',
                       }}>HO</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '13px', fontWeight: 800, color: isExternal ? t.gold : t.text1 }}>Send directly to Head Office</div>
+                        <div style={{ fontSize: '14px', fontWeight: 800, color: t.text1 }}>Send directly to Head Office</div>
                         <div style={{ fontSize: '10.5px', color: t.text3, marginTop: '2px' }}>Bangalore (KA) · no hub stop</div>
                       </div>
                       {isExternal && <span style={{ fontSize: '16px', fontWeight: 900, color: t.gold, flexShrink: 0 }}>✓</span>}
@@ -2567,7 +2570,7 @@ export default function ConsignmentData() {
                     <div style={{ padding: '18px 22px', display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '12px', alignItems: 'center' }}>
                       <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: '9.5px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>From</div>
-                        <div style={{ fontSize: '16px', fontWeight: 800, color: t.gold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.015em' }}>{nav?.branch || '—'}</div>
+                        <div style={{ fontSize: '17px', fontWeight: 800, color: t.gold, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.015em' }}>{nav?.branch || '—'}</div>
                         {srcRegionLabel && <div style={{ fontSize: '10.5px', color: t.text3, marginTop: '4px' }}>{srcRegionLabel}</div>}
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', color: destColor }}>
@@ -2576,7 +2579,7 @@ export default function ConsignmentData() {
                       </div>
                       <div style={{ minWidth: 0, textAlign: 'right' }}>
                         <div style={{ fontSize: '9.5px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>To</div>
-                        <div style={{ fontSize: '16px', fontWeight: 800, color: destColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.015em' }}>{dest}</div>
+                        <div style={{ fontSize: '17px', fontWeight: 800, color: destColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.015em' }}>{dest}</div>
                         {destRegion && <div style={{ fontSize: '10.5px', color: t.text3, marginTop: '4px' }}>{destRegion}</div>}
                       </div>
                     </div>
@@ -2709,7 +2712,7 @@ export default function ConsignmentData() {
                         <span style={{ color: t.text4 }}>·</span>
                         <strong style={{ color: t.gold, fontFamily: 'monospace' }}>{fmtWt(totalSelWt)}</strong>
                         <span style={{ color: t.text4 }}>→</span>
-                        <strong style={{ color: moveType === 'EXTERNAL' ? t.gold : t.purple, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }}>{footDest}</strong>
+                        <strong style={{ color: moveType === 'EXTERNAL' ? t.text1 : t.purple, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }}>{footDest}</strong>
                       </div>
                     ) : (
                       <span style={{ fontSize: '11.5px', color: t.text4 }}>Pick a destination to continue.</span>

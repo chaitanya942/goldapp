@@ -28,7 +28,7 @@ const _ROLE_RESTRICTIONS = {
 
 // ── Themes ────────────────────────────────────────────────────────────────────
 const THEMES = {
-  dark:  { bg: '#0e0e0e', surface: '#111', card: '#141414', card2: '#1a1a1a', card3: '#0f0f0f', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', goldDim: '#c9a84c22', border: '#2a2a2a', border2: '#333', green: '#3aaa6a', greenDim: '#3aaa6a20', red: '#e05555', redDim: '#e0555520', blue: '#3a8fbf' },
+  dark:  { bg: '#0e0e0e', surface: '#111', card: '#141414', card2: '#1a1a1a', card3: '#0f0f0f', text1: '#f0e6c8', text2: '#c8b89a', text3: '#5c4e36', text4: '#4a3a2a', gold: '#c9a84c', goldDim: '#c9a84c22', border: '#2a2a2a', border2: '#333', green: '#3aaa6a', greenDim: '#3aaa6a20', red: '#e05555', redDim: '#e0555520', blue: '#3a8fbf' },
   light: { bg: '#f5f0e8', surface: '#ede8dc', card: '#faf7f2', card2: '#e4dfd3', card3: '#f0ece4', text1: '#1a1208', text2: '#3a2a10', text3: '#8a7a5a', text4: '#b0a080', gold: '#9a7228', goldDim: '#9a722822', border: '#e0dace', border2: '#d0c8b8', green: '#2a8a5a', greenDim: '#2a8a5a20', red: '#cc3333', redDim: '#cc333320', blue: '#2a6fa0' },
 }
 

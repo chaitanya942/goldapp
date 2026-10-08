@@ -37,11 +37,11 @@ const MONTH_NAMES = ['January','February','March','April','May','June','July','A
 const DOW_SHORT   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 
 const T_LIGHT = {
-  bg: '#f5f0e8', card: '#faf7f2', card2: '#f0e9d8', text1: '#1a1208', text2: '#3a2a10', text3: '#6a5a3a', text4: '#9a8a6a',
+  bg: '#f5f0e8', card: '#faf7f2', card2: '#f0e9d8', text1: '#1a1208', text2: '#3a2a10', text3: '#6a5a3a', text4: '#7a6a52',
   gold: '#9a7228', border: '#e0dace', border2: '#d0c8b8', red: '#c03030', green: '#2a8050',
 }
 const T_DARK = {
-  bg: '#0a0a0a', card: '#111111', card2: '#1a1a1a', text1: '#f0e6c8', text2: '#c8b89a', text3: '#7a6a4a', text4: '#4a3a2a',
+  bg: '#0a0a0a', card: '#111111', card2: '#1a1a1a', text1: '#f0e6c8', text2: '#c8b89a', text3: '#5c4e36', text4: '#4a3a2a',
   gold: '#c9a84c', border: '#1e1e1e', border2: '#2a2a2a', red: '#e05555', green: '#3aaa6a',
 }
 

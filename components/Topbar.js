@@ -10,7 +10,7 @@ import { authedFetch } from '../lib/authedFetch'
 const THEMES = {
   dark: {
     bg: '#0f0f0d', border: '#1e1e1a', text1: '#f0e6c8', text2: '#c8b89a',
-    text3: '#7a6a4a', text4: '#4a3a2a', gold: '#c9a84c', goldBg: 'rgba(201,168,76,0.1)',
+    text3: '#5c4e36', text4: '#4a3a2a', gold: '#c9a84c', goldBg: 'rgba(201,168,76,0.1)',
     goldBorder: 'rgba(201,168,76,0.25)', red: '#e05555', green: '#3aaa6a',
     pillBg: 'rgba(255,255,255,0.04)', pillHov: 'rgba(255,255,255,0.07)',
     avatarBg: 'linear-gradient(135deg, #c9a84c 0%, #7a4a10 100%)',

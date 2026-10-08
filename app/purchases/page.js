@@ -11,7 +11,7 @@ import BlacklistedCustomers from '../../components/purchases/BlacklistedCustomer
 
 const THEMES = {
   dark:  { bg: '#0a0a0a', card: '#111111', text1: '#f0e6c8', text2: '#c8b89a', text3: '#9a8a6a', text4: '#6a5a3a', gold: '#c9a84c', border: '#1e1e1e', red: '#e05555', orange: '#c9981f', green: '#3aaa6a' },
-  light: { bg: '#f0ebe0', card: '#e8e2d6', text1: '#1a1208', text2: '#5a4a2a', text3: '#7a6a4a', text4: '#9a8a6a', gold: '#a07830', border: '#d0c8b8', red: '#c03030', orange: '#a07010', green: '#2a8a5a' },
+  light: { bg: '#f0ebe0', card: '#e8e2d6', text1: '#1a1208', text2: '#5a4a2a', text3: '#5c4e36', text4: '#7a6a52', gold: '#a07830', border: '#d0c8b8', red: '#c03030', orange: '#a07010', green: '#2a8a5a' },
 }
 
 const TABS = [

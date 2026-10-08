@@ -50,12 +50,12 @@ export default function GoldBuyingRate() {
   // alongside the rest of the admin module.
   const t = dark ? {
     bg: '#0a0a0a', panel: '#141210', panel2: '#1a1612', border: '#2a2520',
-    text1: '#f0e6c8', text2: '#c8b890', text3: '#7a6a4a', text4: '#5a4a2a',
+    text1: '#f0e6c8', text2: '#c8b890', text3: '#5c4e36', text4: '#5a4a2a',
     gold: '#c9a84c', goldDim: 'rgba(201,168,76,.12)',
     green: '#3aaa6a', orange: '#e58a3b', red: '#e05555',
   } : {
     bg: '#f5f0e8', panel: '#fffdf7', panel2: '#f8f3e6', border: '#e0d8c4',
-    text1: '#1a1208', text2: '#3a2e18', text3: '#7a6a4a', text4: '#a09070',
+    text1: '#1a1208', text2: '#3a2e18', text3: '#5c4e36', text4: '#a09070',
     gold: '#9a7228', goldDim: 'rgba(154,114,40,.12)',
     green: '#2a8a4a', orange: '#c56a1a', red: '#c54545',
   }
