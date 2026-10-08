@@ -2579,7 +2579,7 @@ export default function ConsignmentData() {
                       </div>
                       <div style={{ minWidth: 0, textAlign: 'right' }}>
                         <div style={{ fontSize: '9.5px', color: t.text4, letterSpacing: '.14em', textTransform: 'uppercase', fontWeight: 700, marginBottom: '6px' }}>To</div>
-                        <div style={{ fontSize: '17px', fontWeight: 800, color: destColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.015em' }}>{dest}</div>
+                        <div style={{ fontSize: '17px', fontWeight: 800, color: destColor, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.015em', textTransform: isExternal ? 'uppercase' : 'none' }}>{dest}</div>
                         {destRegion && <div style={{ fontSize: '10.5px', color: t.text3, marginTop: '4px' }}>{destRegion}</div>}
                       </div>
                     </div>
@@ -2712,7 +2712,7 @@ export default function ConsignmentData() {
                         <span style={{ color: t.text4 }}>·</span>
                         <strong style={{ color: t.gold, fontFamily: 'monospace' }}>{fmtWt(totalSelWt)}</strong>
                         <span style={{ color: t.text4 }}>→</span>
-                        <strong style={{ color: moveType === 'EXTERNAL' ? t.text1 : t.purple, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px' }}>{footDest}</strong>
+                        <strong style={{ color: moveType === 'EXTERNAL' ? t.text1 : t.purple, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '220px', textTransform: moveType === 'EXTERNAL' ? 'uppercase' : 'none' }}>{footDest}</strong>
                       </div>
                     ) : (
                       <span style={{ fontSize: '11.5px', color: t.text4 }}>Pick a destination to continue.</span>
