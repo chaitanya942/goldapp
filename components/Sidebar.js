@@ -53,6 +53,8 @@ const NAV_ITEMS = [
   },
   // Productivity — gated to a hard email allowlist (see PAGE_EMAIL_ALLOWLIST).
   { id: 'productivity', label: 'Productivity', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', desc: 'Insights & throughput' },
+  // Simulation — gated to a hard email allowlist (see PAGE_EMAIL_ALLOWLIST), chaitanya@whitegold.money only.
+  { id: 'simulation', label: 'Simulation', icon: 'M8 7h12m0 0l-4-4m4 4l-4 4M4 17h6m6 0h4m-4 0l-3 3m3-3l-3-3M4 7h2', desc: 'Flow playground' },
 ]
 
 const ADMIN_ITEMS = [
