@@ -60,7 +60,7 @@ export default function JarvisFootfallCard({ t, isMobile }) {
     body = (
       <>
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? 14 : 18 }}>
-          <Metric t={t} label="Store footfall" value={fmtN(s.footfall)} color={t.blue} sub="Jarvis cameras" />
+          <Metric t={t} label="Store footfall" value={fmtN(s.footfall)} color={t.blue} sub="Footfall count" />
           <Metric t={t} label="CRM walk-ins" value={fmtN(s.walkins)} color={t.gold} sub={s.rewalkins ? `${fmtN(s.fresh)} fresh · ${fmtN(s.rewalkins)} re-walk-in` : 'punched in CRM'} />
           <Metric t={t} label="Punch rate" value={fmtPctR(s.punch)} color={pc} sub="walk-ins ÷ footfall" />
           <Metric t={t} label="Not punched" value={fmtN(Math.max(0, s.gap))} color={s.gap > 0 ? (t.orange || t.gold) : t.green} sub="footfall − walk-ins" />
@@ -93,7 +93,7 @@ export default function JarvisFootfallCard({ t, isMobile }) {
         <div style={{ width: 32, height: 32, borderRadius: 9, background: `${t.blue}22`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>👥</div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: t.text1 }}>Store footfall vs CRM walk-ins</div>
-          <div style={{ fontSize: 11.5, color: t.text3 }}>{dayLabel} · Jarvis cameras{synced ? ` · synced ${synced}` : ''}</div>
+          <div style={{ fontSize: 11.5, color: t.text3 }}>{dayLabel} · Jarvis{synced ? ` · synced ${synced}` : ''}</div>
         </div>
         <button onClick={openSection} style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${t.border}`, background: t.card, color: t.text2, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
           Branch breakdown →
