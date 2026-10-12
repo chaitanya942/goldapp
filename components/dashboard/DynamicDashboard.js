@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { useApp, canSeeJarvis } from '../../lib/context'
+import { useApp } from '../../lib/context'
+import { canSeeJarvis } from '../../lib/jarvisAccess'
 import { authedFetch } from '../../lib/authedFetch'
 import { triggerSync } from '../../lib/triggerSync'
 import {

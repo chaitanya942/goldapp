@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { useApp, useRegionAccess, canSeeJarvis } from '../../lib/context'
+import { useApp, useRegionAccess } from '../../lib/context'
+import { canSeeJarvis } from '../../lib/jarvisAccess'
 import LiveTicker from '../ui/LiveTicker'
 import { getVisibleModules } from '../../lib/modules'
 import { authedFetch } from '../../lib/authedFetch'

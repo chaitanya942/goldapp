@@ -5,7 +5,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { requireAuth } from '../../../lib/apiAuth'
-import { canSeeJarvis } from '../../../lib/context'
+import { canSeeJarvis } from '../../../lib/jarvisAccess'
 import { getAllowedRegionsForAuth } from '../../../lib/regionScope'
 import { selectAllRows } from '../../../lib/supabaseAll'
 import { oldCrmWalkins, newCrmWalkins, mergeFootfallRows } from '../../../lib/jarvisFootfallData'

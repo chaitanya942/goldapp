@@ -63,8 +63,8 @@ export function useJarvisFootfall(from, to) {
     if (!silent) setState(s => ({ ...s, loading: true }))
     try {
       const res = await authedFetch(`/api/jarvis-footfall?from=${from}&to=${to}`)
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`)
+      const json = await res.json().catch(() => null)
+      if (!res.ok || !json) throw new Error(json?.error || `Server error (HTTP ${res.status})`)
       setState({ loading: false, data: json, error: null })
     } catch (err) {
       setState(s => ({ loading: false, data: s.data, error: err.message }))
