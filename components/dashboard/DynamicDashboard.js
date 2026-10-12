@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { useApp } from '../../lib/context'
+import { useApp, canSeeJarvis } from '../../lib/context'
 import { authedFetch } from '../../lib/authedFetch'
 import { triggerSync } from '../../lib/triggerSync'
 import {
@@ -1185,7 +1185,7 @@ export default function DynamicDashboard() {
       )}
 
       {/* ── Store footfall vs CRM walk-ins (Jarvis cameras) ── */}
-      {canSee('jarvis') && (
+      {canSeeJarvis(userProfile?.role, userProfile?.email) && (
         <div style={{ marginTop: 14 }}>
           <JarvisFootfallCard t={t} isMobile={isMobile} />
         </div>
@@ -1199,7 +1199,7 @@ export default function DynamicDashboard() {
       )}
 
       {/* ── Jarvis · store footfall ── */}
-      {canSee('jarvis') && <JarvisFootfallSection t={t} isMobile={isMobile} />}
+      {canSeeJarvis(userProfile?.role, userProfile?.email) && <JarvisFootfallSection t={t} isMobile={isMobile} />}
 
       {/* ── Telesales ── */}
       {hasTelesales && (

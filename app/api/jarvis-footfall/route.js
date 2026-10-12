@@ -4,7 +4,8 @@
 // their regions.
 
 import { createClient } from '@supabase/supabase-js'
-import { requireAuthForPage } from '../../../lib/apiAuth'
+import { requireAuth } from '../../../lib/apiAuth'
+import { canSeeJarvis } from '../../../lib/context'
 import { getAllowedRegionsForAuth } from '../../../lib/regionScope'
 import { selectAllRows } from '../../../lib/supabaseAll'
 import { oldCrmWalkins, newCrmWalkins, mergeFootfallRows } from '../../../lib/jarvisFootfallData'
@@ -28,9 +29,12 @@ const spanDays = (a, b) => Math.round((new Date(`${b}T00:00:00Z`) - new Date(`${
 const isMissingTable = (err) => /jarvis_footfall/.test(err?.message || '') && /does not exist|schema cache/i.test(err?.message || '')
 
 export async function GET(req) {
-  // Locked to the 'jarvis' email allowlist (lib/context.js) — 403 for everyone else.
-  const auth = await requireAuthForPage(req, 'jarvis')
+  // Super_admins + JARVIS_EXTRA_EMAILS only (lib/context.js) — 403 for everyone else.
+  const auth = await requireAuth(req, { requiredRoles: null })
   if (!auth.ok) return auth.response
+  if (!canSeeJarvis(auth.role, auth.profile?.email || auth.user?.email)) {
+    return Response.json({ error: 'Not authorized for Jarvis footfall.' }, { status: 403 })
+  }
 
   // Only completed days: today's camera counts are partial, so every range is
   // capped at yesterday (IST).

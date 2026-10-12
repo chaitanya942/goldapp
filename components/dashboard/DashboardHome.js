@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
-import { useApp, useRegionAccess } from '../../lib/context'
+import { useApp, useRegionAccess, canSeeJarvis } from '../../lib/context'
 import LiveTicker from '../ui/LiveTicker'
 import { getVisibleModules } from '../../lib/modules'
 import { authedFetch } from '../../lib/authedFetch'
@@ -1483,7 +1483,7 @@ export default function DashboardHome() {
       )}
 
       {/* ── STORE FOOTFALL vs CRM WALK-INS (Jarvis cameras) ── */}
-      {canSee('jarvis') && (
+      {canSeeJarvis(userProfile?.role, userProfile?.email) && (
         <div style={{ marginTop: 14 }}>
           <JarvisFootfallCard t={t} isMobile={isMobile} />
         </div>
@@ -1935,7 +1935,7 @@ export default function DashboardHome() {
       </div>}
 
       {/* ── JARVIS · STORE FOOTFALL (collapsible) ── */}
-      {canSee('jarvis') && <JarvisFootfallSection t={t} isMobile={isMobile} />}
+      {canSeeJarvis(userProfile?.role, userProfile?.email) && <JarvisFootfallSection t={t} isMobile={isMobile} />}
 
       {/* ── CONSIGNMENT OVERVIEW (collapsible) ──
           Gated specifically to consignment-report: this widget IS the
