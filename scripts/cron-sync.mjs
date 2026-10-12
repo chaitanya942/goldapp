@@ -312,10 +312,31 @@ async function syncOnce() {
   // Every ~5 min (bounces trickle in, no need to hammer IMAP each tick).
   maybeScanBounces().catch(() => null)
 
-  // Piggy-back the Jarvis store-footfall copy — every ~20 min for recent days,
-  // plus a full 15-day pass once per IST day (Jarvis serves only 15 days and
-  // revises counts after its staff-reduction run).
+  // Piggy-back the Jarvis store-footfall copy — today's counts every minute
+  // (near-realtime dashboard), recent/unsettled days every ~20 min, plus a full
+  // 15-day pass once per IST day (Jarvis serves only 15 days and revises
+  // counts after its staff-reduction run).
+  maybeSyncJarvisToday().catch(() => null)
   maybeSyncJarvis().catch(() => null)
+}
+
+let lastJarvisTodayMs = 0
+let inFlightJarvisToday = false
+const JARVIS_TODAY_EVERY_MS = 60 * 1000
+async function maybeSyncJarvisToday() {
+  const now = Date.now()
+  if (inFlightJarvisToday || now - lastJarvisTodayMs < JARVIS_TODAY_EVERY_MS) return
+  inFlightJarvisToday = true
+  lastJarvisTodayMs = now
+  try {
+    const res = await fetch(`${JARVIS_SYNC_URL}?scope=today`, { method: 'POST', headers: { 'x-cron-token': CRON_SECRET } })
+    const j = await res.json().catch(() => ({}))
+    if (!res.ok || j.success === false) console.error(new Date().toISOString(), `[cron-sync] jarvis today FAIL ${res.status}`, j.error || '')
+  } catch (err) {
+    console.error(new Date().toISOString(), '[cron-sync] jarvis today threw:', err?.message || err)
+  } finally {
+    inFlightJarvisToday = false
+  }
 }
 
 let lastJarvisSyncMs = 0

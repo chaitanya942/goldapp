@@ -19,6 +19,7 @@ const supabase = createClient(
 
 const MAX_SPAN_DAYS = 92
 const CACHE_TTL_MS = 60_000
+const LIVE_CACHE_TTL_MS = 20_000   // ranges that include today refresh near-realtime
 const cache = new Map()
 
 const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '')
@@ -40,7 +41,8 @@ export async function GET(req) {
   const allowedRegions = await getAllowedRegionsForAuth(supabase, auth)
   const cacheKey = `${from}|${to}|${(allowedRegions || ['ALL']).slice().sort().join(',')}`
   const hit = cache.get(cacheKey)
-  if (hit && Date.now() - hit.ts < CACHE_TTL_MS) return Response.json({ ...hit.data, cached: true })
+  const ttl = to >= today ? LIVE_CACHE_TTL_MS : CACHE_TTL_MS
+  if (hit && Date.now() - hit.ts < ttl) return Response.json({ ...hit.data, cached: true })
 
   const { data: branches, error: brErr } = await supabase.from('branches').select('name, region, crm_branch_id')
   if (brErr) return Response.json({ error: brErr.message }, { status: 500 })

@@ -45,18 +45,22 @@ export async function POST(req) {
   const today = istToday()
   const oldest = addDays(today, -(JARVIS_WINDOW_DAYS - 1))
 
-  const dates = new Set(Array.from({ length: days }, (_, i) => addDays(today, -i)))
-  let unsettled
-  try {
-    unsettled = await selectAllRows(() => supabase.from('jarvis_footfall')
-      .select('footfall_date')
-      .gte('footfall_date', oldest)
-      .or('data_status.neq.FULL,staff_reduction_status.neq.SUCCESS,data_status.is.null,staff_reduction_status.is.null'))
-  } catch (err) {
-    if (isMissingTable(err)) return Response.json({ success: false, error: 'jarvis_footfall table missing — run sql/jarvis_footfall.sql in Supabase' }, { status: 500 })
-    return Response.json({ success: false, error: err.message }, { status: 500 })
+  // ?scope=today is the fast every-minute refresh: only today's partial counts.
+  const todayOnly = searchParams.get('scope') === 'today'
+  const dates = new Set(todayOnly ? [today] : Array.from({ length: days }, (_, i) => addDays(today, -i)))
+  if (!todayOnly) {
+    let unsettled
+    try {
+      unsettled = await selectAllRows(() => supabase.from('jarvis_footfall')
+        .select('footfall_date')
+        .gte('footfall_date', oldest)
+        .or('data_status.neq.FULL,staff_reduction_status.neq.SUCCESS,data_status.is.null,staff_reduction_status.is.null'))
+    } catch (err) {
+      if (isMissingTable(err)) return Response.json({ success: false, error: 'jarvis_footfall table missing — run sql/jarvis_footfall.sql in Supabase' }, { status: 500 })
+      return Response.json({ success: false, error: err.message }, { status: 500 })
+    }
+    for (const r of unsettled) if (r.footfall_date >= oldest) dates.add(r.footfall_date)
   }
-  for (const r of unsettled) if (r.footfall_date >= oldest) dates.add(r.footfall_date)
 
   let sess
   try { sess = await jarvisSession(true) }

@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { authedFetch } from '../../lib/authedFetch'
 
 export const JARVIS_REFRESH_MS = 5 * 60 * 1000
+export const JARVIS_LIVE_REFRESH_MS = 60 * 1000
 
 const istToday = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10)
 const addDays = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10) }
@@ -52,8 +53,11 @@ export function useJarvisFootfall(from, to) {
   useEffect(() => {
     if (!from || !to) return
     load()
-    const id = setInterval(() => load(true), JARVIS_REFRESH_MS)
-    return () => clearInterval(id)
+    const live = to >= istToday()
+    const id = setInterval(() => { if (!document.hidden) load(true) }, live ? JARVIS_LIVE_REFRESH_MS : JARVIS_REFRESH_MS)
+    const onFocus = () => { if (!document.hidden) load(true) }
+    document.addEventListener('visibilitychange', onFocus)
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onFocus) }
   }, [load, from, to])
   return { ...state, reload: () => load(true) }
 }
