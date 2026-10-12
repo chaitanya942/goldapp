@@ -1483,7 +1483,7 @@ export default function DashboardHome() {
       )}
 
       {/* ── STORE FOOTFALL vs CRM WALK-INS (Jarvis cameras) ── */}
-      {canSee('tab.purchase-data.live') && (
+      {canSee('jarvis') && (
         <div style={{ marginTop: 14 }}>
           <JarvisFootfallCard t={t} isMobile={isMobile} />
         </div>
@@ -1935,7 +1935,7 @@ export default function DashboardHome() {
       </div>}
 
       {/* ── JARVIS · STORE FOOTFALL (collapsible) ── */}
-      {canSee('tab.purchase-data.live') && <JarvisFootfallSection t={t} isMobile={isMobile} />}
+      {canSee('jarvis') && <JarvisFootfallSection t={t} isMobile={isMobile} />}
 
       {/* ── CONSIGNMENT OVERVIEW (collapsible) ──
           Gated specifically to consignment-report: this widget IS the

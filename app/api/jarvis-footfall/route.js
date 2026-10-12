@@ -4,7 +4,7 @@
 // their regions.
 
 import { createClient } from '@supabase/supabase-js'
-import { requireAuth } from '../../../lib/apiAuth'
+import { requireAuthForPage } from '../../../lib/apiAuth'
 import { getAllowedRegionsForAuth } from '../../../lib/regionScope'
 import { selectAllRows } from '../../../lib/supabaseAll'
 import { oldCrmWalkins, newCrmWalkins, mergeFootfallRows } from '../../../lib/jarvisFootfallData'
@@ -28,7 +28,8 @@ const spanDays = (a, b) => Math.round((new Date(`${b}T00:00:00Z`) - new Date(`${
 const isMissingTable = (err) => /jarvis_footfall/.test(err?.message || '') && /does not exist|schema cache/i.test(err?.message || '')
 
 export async function GET(req) {
-  const auth = await requireAuth(req, { requiredRoles: null })
+  // Locked to the 'jarvis' email allowlist (lib/context.js) — 403 for everyone else.
+  const auth = await requireAuthForPage(req, 'jarvis')
   if (!auth.ok) return auth.response
 
   // Only completed days: today's camera counts are partial, so every range is

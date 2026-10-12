@@ -1185,7 +1185,7 @@ export default function DynamicDashboard() {
       )}
 
       {/* ── Store footfall vs CRM walk-ins (Jarvis cameras) ── */}
-      {canSee('tab.purchase-data.live') && (
+      {canSee('jarvis') && (
         <div style={{ marginTop: 14 }}>
           <JarvisFootfallCard t={t} isMobile={isMobile} />
         </div>
@@ -1199,7 +1199,7 @@ export default function DynamicDashboard() {
       )}
 
       {/* ── Jarvis · store footfall ── */}
-      {canSee('tab.purchase-data.live') && <JarvisFootfallSection t={t} isMobile={isMobile} />}
+      {canSee('jarvis') && <JarvisFootfallSection t={t} isMobile={isMobile} />}
 
       {/* ── Telesales ── */}
       {hasTelesales && (
