@@ -27,7 +27,7 @@ export default function JarvisFootfallCard({ t, isMobile }) {
   // Latest completed day with store activity — yesterday normally, or the
   // last working day when yesterday was a closed day (Sunday / holiday).
   const yday = jarvisYesterday()
-  const { from, to } = jarvisRange('week')
+  const { from, to } = jarvisRange('2weeks')
   const { data, loading, error } = useJarvisFootfall(from, to)
   const day = useMemo(() => {
     const active = (data?.rows || [])
@@ -55,7 +55,7 @@ export default function JarvisFootfallCard({ t, isMobile }) {
   } else if (!data && error) {
     body = <div style={{ fontSize: 13, color: t.red }}>Couldn&apos;t load footfall: {error}</div>
   } else if (s.cameras === 0) {
-    body = <div style={{ fontSize: 13, color: t.text3 }}>No camera footfall recorded in the last 7 days.</div>
+    body = <div style={{ fontSize: 13, color: t.text3 }}>No camera footfall recorded in the last 14 days.</div>
   } else {
     body = (
       <>

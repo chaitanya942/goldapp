@@ -4,6 +4,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { authedFetch } from '../../lib/authedFetch'
+import { istLastWeekRange } from '../../lib/dateIst'
 
 export const JARVIS_REFRESH_MS = 5 * 60 * 1000
 
@@ -29,7 +30,7 @@ export const JARVIS_PERIODS = [
 export function jarvisRange(key, custom) {
   const today = istToday()
   const yday = addDays(today, -1)
-  if (key === 'week') return { from: addDays(yday, -6), to: yday }
+  if (key === 'week') return istLastWeekRange()
   if (key === '2weeks') return { from: addDays(yday, -13), to: yday }
   if (key === 'month') {
     const from = `${today.slice(0, 7)}-01`
