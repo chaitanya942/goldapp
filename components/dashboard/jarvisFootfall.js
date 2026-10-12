@@ -88,7 +88,6 @@ export function summarizeFootfall(rows, { region = null, branch = null } = {}) {
   const cam = sel.filter(r => r.footfall != null)
 
   const t = { footfall: 0, walkins: 0, fresh: 0, rewalkins: 0, male: 0, female: 0, unclassified: 0, genderKnown: false, pendingStaff: 0 }
-  const age = {}
   const byBranch = new Map()
   const byDay = new Map()
   for (const r of cam) {
@@ -105,7 +104,6 @@ export function summarizeFootfall(rows, { region = null, branch = null } = {}) {
     }
     const pending = !!r.staff_status && r.staff_status !== 'SUCCESS'
     if (pending) t.pendingStaff++
-    if (r.age) for (const [k, v] of Object.entries(r.age)) age[k] = (age[k] || 0) + (Number(v) || 0)
 
     let b = byBranch.get(r.branch)
     if (!b) { b = { branch: r.branch, region: r.region, footfall: 0, walkins: 0, rewalkins: 0, male: 0, female: 0, pendingDays: 0, deadDays: 0, partialDays: 0, days: 0 }; byBranch.set(r.branch, b) }
@@ -147,7 +145,6 @@ export function summarizeFootfall(rows, { region = null, branch = null } = {}) {
     gap: t.footfall - t.walkins,
     cameras: camBranches.size,
     reporting: branches.filter(b => b.footfall > 0).length,
-    age: Object.keys(age).length ? age : null,
     allWalkins,
     branches,
     days: [...byDay.values()].sort((a, b) => (a.date < b.date ? -1 : 1)),

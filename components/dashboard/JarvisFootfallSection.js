@@ -131,7 +131,7 @@ export default function JarvisFootfallSection({ t, isMobile }) {
     } else {
       body = (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(6, 1fr)', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)', gap: 10 }}>
             <Tile t={t} label="Store footfall" value={fmtN(s.footfall)} color={t.blue} sub={`${s.reporting}/${s.cameras} cameras reporting`} />
             <Tile t={t} label="CRM walk-ins" value={fmtN(s.walkins)} color={t.gold} sub={`${fmtN(s.fresh)} fresh · ${fmtN(s.rewalkins)} re-walk-in`} />
             <Tile t={t} label="Punch rate" value={fmtPctR(s.punch)} color={punchColor(t, s.punch)} sub="walk-ins ÷ footfall" />
@@ -144,11 +144,6 @@ export default function JarvisFootfallSection({ t, isMobile }) {
                     ...(s.unclassified > 0 ? [{ label: 'Unclassified', value: s.unclassified, color: t.text4 }] : []),
                   ]} />
                 : <div style={{ fontSize: 12, color: t.text3, marginTop: 6 }}>Not reported</div>}
-            </Tile>
-            <Tile t={t} label="Age groups">
-              {s.age
-                ? <SplitBar t={t} parts={Object.entries(s.age).map(([k, v], i) => ({ label: k.replace(/\s*\(.*\)/, ''), value: v, color: [t.green, t.blue, t.gold, t.red][i % 4] }))} />
-                : <div style={{ fontSize: 12, color: t.text3, marginTop: 6 }}>Not provided by Jarvis for these stores</div>}
             </Tile>
           </div>
 
