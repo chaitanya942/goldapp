@@ -326,7 +326,9 @@ async function maybeSyncJarvis() {
   const now = Date.now()
   const today = istDateStr()
   const full = lastJarvisFullDate !== today
-  if (inFlightJarvis || (!full && now - lastJarvisSyncMs < JARVIS_SYNC_EVERY_MS)) return
+  // Until today's full pass succeeds, retry every 2 min (not every tick).
+  const minGap = full ? 2 * 60 * 1000 : JARVIS_SYNC_EVERY_MS
+  if (inFlightJarvis || now - lastJarvisSyncMs < minGap) return
   inFlightJarvis = true
   lastJarvisSyncMs = now
   try {
