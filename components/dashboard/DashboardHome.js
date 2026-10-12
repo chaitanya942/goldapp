@@ -15,6 +15,8 @@ import LiveFeedFlashcards from './LiveFeedFlashcards'
 import MonthProjection from './MonthProjection'
 import TodaysBookingsWidget from './TodaysBookingsWidget'
 import BusinessCalendarInsight from './BusinessCalendarInsight'
+import JarvisFootfallCard from './JarvisFootfallCard'
+import JarvisFootfallSection from './JarvisFootfallSection'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const fmtDate = (iso) => { if (!iso) return ''; const [y,m,d] = iso.split('-'); return `${d}-${MONTHS[+m-1]}-${y}` }
@@ -1480,6 +1482,13 @@ export default function DashboardHome() {
         </div>
       )}
 
+      {/* ── STORE FOOTFALL vs CRM WALK-INS (Jarvis cameras) ── */}
+      {canSee('tab.purchase-data.live') && (
+        <div style={{ marginTop: 14 }}>
+          <JarvisFootfallCard t={t} isMobile={isMobile} />
+        </div>
+      )}
+
       {/* ── MOBILE MODULE GRID — clean grouped-by-module view (role-aware) ── */}
       {isMobile && (() => {
         const visibleModules = getVisibleModules(canSee)
@@ -1924,6 +1933,9 @@ export default function DashboardHome() {
           </div>
         </div>
       </div>}
+
+      {/* ── JARVIS · STORE FOOTFALL (collapsible) ── */}
+      {canSee('tab.purchase-data.live') && <JarvisFootfallSection t={t} isMobile={isMobile} />}
 
       {/* ── CONSIGNMENT OVERVIEW (collapsible) ──
           Gated specifically to consignment-report: this widget IS the

@@ -18,6 +18,8 @@ import TodaysBookingsWidget from './TodaysBookingsWidget'
 import LiveFeedFlashcards from './LiveFeedFlashcards'
 import MonthProjection from './MonthProjection'
 import BusinessCalendarInsight from './BusinessCalendarInsight'
+import JarvisFootfallCard from './JarvisFootfallCard'
+import JarvisFootfallSection from './JarvisFootfallSection'
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 const MONTHS   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -1182,12 +1184,22 @@ export default function DynamicDashboard() {
         />
       )}
 
+      {/* ── Store footfall vs CRM walk-ins (Jarvis cameras) ── */}
+      {canSee('tab.purchase-data.live') && (
+        <div style={{ marginTop: 14 }}>
+          <JarvisFootfallCard t={t} isMobile={isMobile} />
+        </div>
+      )}
+
       {/* ── Purchase ── */}
       {hasPurchase && (
         <CollapsibleSection icon="◉" label="Purchases" color={t.gold} t={t} expanded={sectionOpen.purchase} onToggle={() => toggleSection('purchase')}>
           <PurchaseInline t={t} setActiveNav={setActiveNav} canSee={canSee} />
         </CollapsibleSection>
       )}
+
+      {/* ── Jarvis · store footfall ── */}
+      {canSee('tab.purchase-data.live') && <JarvisFootfallSection t={t} isMobile={isMobile} />}
 
       {/* ── Telesales ── */}
       {hasTelesales && (

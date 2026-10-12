@@ -42,6 +42,7 @@ const EMPLOYEE_SYNC_URL    = `${APP_URL}/api/sync-branch-employees`
 const BRANCH_SYNC_URL      = `${APP_URL}/api/sync-branches-auto`
 const REPORT_DISPATCH_URL  = `${APP_URL}/api/reports/dispatch`
 const BOUNCE_SCAN_URL      = `${APP_URL}/api/consignments/scan-bounces`
+const JARVIS_SYNC_URL      = `${APP_URL}/api/sync-jarvis`
 const HEADERS              = { Authorization: `Bearer ${CRON_SECRET}` }
 // /api/eod-inventory-snapshot POST + /api/bidding/section1-audit POST both
 // gate on x-cron-token (not Bearer).
@@ -310,6 +311,38 @@ async function syncOnce() {
   // consignment-document emails and flips those rows to "Delivery Failed".
   // Every ~5 min (bounces trickle in, no need to hammer IMAP each tick).
   maybeScanBounces().catch(() => null)
+
+  // Piggy-back the Jarvis store-footfall copy — every ~20 min for recent days,
+  // plus a full 15-day pass once per IST day (Jarvis serves only 15 days and
+  // revises counts after its staff-reduction run).
+  maybeSyncJarvis().catch(() => null)
+}
+
+let lastJarvisSyncMs = 0
+let lastJarvisFullDate = ''
+let inFlightJarvis = false
+const JARVIS_SYNC_EVERY_MS = 20 * 60 * 1000
+async function maybeSyncJarvis() {
+  const now = Date.now()
+  const today = istDateStr()
+  const full = lastJarvisFullDate !== today
+  if (inFlightJarvis || (!full && now - lastJarvisSyncMs < JARVIS_SYNC_EVERY_MS)) return
+  inFlightJarvis = true
+  lastJarvisSyncMs = now
+  try {
+    const res = await fetch(`${JARVIS_SYNC_URL}?days=${full ? 15 : 2}`, { method: 'POST', headers: { 'x-cron-token': CRON_SECRET } })
+    const j = await res.json().catch(() => ({}))
+    if (!res.ok || j.success === false) {
+      console.error(new Date().toISOString(), `[cron-sync] jarvis sync FAIL ${res.status}`, j.error || '')
+      return
+    }
+    if (full) lastJarvisFullDate = today
+    console.log(new Date().toISOString(), `[cron-sync] jarvis sync ok: ${j.upserted} store-days over ${j.dates?.length} day(s)${j.failed ? ` · ${j.failed} failed (${(j.failures || []).slice(0, 3).join('; ')})` : ''}`)
+  } catch (err) {
+    console.error(new Date().toISOString(), '[cron-sync] jarvis sync threw:', err?.message || err)
+  } finally {
+    inFlightJarvis = false
+  }
 }
 
 let lastBounceScanMs = 0
