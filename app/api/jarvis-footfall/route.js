@@ -19,11 +19,11 @@ const supabase = createClient(
 
 const MAX_SPAN_DAYS = 92
 const CACHE_TTL_MS = 60_000
-const LIVE_CACHE_TTL_MS = 20_000   // ranges that include today refresh near-realtime
 const cache = new Map()
 
 const isDate = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '')
 const istToday = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10)
+const addDays = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10) }
 const spanDays = (a, b) => Math.round((new Date(`${b}T00:00:00Z`) - new Date(`${a}T00:00:00Z`)) / 86400000) + 1
 const isMissingTable = (err) => /jarvis_footfall/.test(err?.message || '') && /does not exist|schema cache/i.test(err?.message || '')
 
@@ -31,18 +31,21 @@ export async function GET(req) {
   const auth = await requireAuth(req, { requiredRoles: null })
   if (!auth.ok) return auth.response
 
+  // Only completed days: today's camera counts are partial, so every range is
+  // capped at yesterday (IST).
   const { searchParams } = new URL(req.url)
   const today = istToday()
-  const from = isDate(searchParams.get('from')) ? searchParams.get('from') : today
-  const to = isDate(searchParams.get('to')) ? searchParams.get('to') : from
-  if (to < from) return Response.json({ error: 'from must be on or before to' }, { status: 400 })
+  const yesterday = addDays(today, -1)
+  const from = isDate(searchParams.get('from')) ? searchParams.get('from') : yesterday
+  let to = isDate(searchParams.get('to')) ? searchParams.get('to') : from
+  if (to > yesterday) to = yesterday
+  if (to < from) return Response.json({ error: 'Pick a range ending yesterday or earlier — today is excluded' }, { status: 400 })
   if (spanDays(from, to) > MAX_SPAN_DAYS) return Response.json({ error: `Range is limited to ${MAX_SPAN_DAYS} days` }, { status: 400 })
 
   const allowedRegions = await getAllowedRegionsForAuth(supabase, auth)
   const cacheKey = `${from}|${to}|${(allowedRegions || ['ALL']).slice().sort().join(',')}`
   const hit = cache.get(cacheKey)
-  const ttl = to >= today ? LIVE_CACHE_TTL_MS : CACHE_TTL_MS
-  if (hit && Date.now() - hit.ts < ttl) return Response.json({ ...hit.data, cached: true })
+  if (hit && Date.now() - hit.ts < CACHE_TTL_MS) return Response.json({ ...hit.data, cached: true })
 
   const { data: branches, error: brErr } = await supabase.from('branches').select('name, region, crm_branch_id')
   if (brErr) return Response.json({ error: brErr.message }, { status: 500 })

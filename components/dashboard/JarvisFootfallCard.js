@@ -1,10 +1,11 @@
 'use client'
 
-// Dashboard card: today's Jarvis camera footfall vs walk-ins punched in the CRM.
+// Dashboard card: Jarvis camera footfall vs walk-ins punched in the CRM for the
+// latest completed working day (today is never shown — counts are partial).
 
 import { useMemo } from 'react'
 import {
-  useJarvisFootfall, jarvisRange, summarizeFootfall, punchColor, fmtN, fmtPctR, fmtTime,
+  useJarvisFootfall, jarvisRange, jarvisYesterday, summarizeFootfall, punchColor, fmtN, fmtPctR, fmtTime,
 } from './jarvisFootfall'
 
 export const JARVIS_SECTION_ID = 'jarvis-footfall-section'
@@ -20,10 +21,22 @@ function Metric({ t, label, value, sub, color }) {
   )
 }
 
+const fmtDay = (d) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
+
 export default function JarvisFootfallCard({ t, isMobile }) {
-  const { from, to } = jarvisRange('today')
+  // Latest completed day with store activity — yesterday normally, or the
+  // last working day when yesterday was a closed day (Sunday / holiday).
+  const yday = jarvisYesterday()
+  const { from, to } = jarvisRange('week')
   const { data, loading, error } = useJarvisFootfall(from, to)
-  const s = useMemo(() => summarizeFootfall(data?.rows, { today: data?.today }), [data])
+  const day = useMemo(() => {
+    const active = (data?.rows || [])
+      .filter(r => (r.footfall || 0) > 0 || r.walkins_old + r.walkins_new + r.rewalkins > 0)
+      .map(r => r.date)
+    return active.length ? active.reduce((a, b) => (a > b ? a : b)) : yday
+  }, [data, yday])
+  const s = useMemo(() => summarizeFootfall((data?.rows || []).filter(r => r.date === day)), [data, day])
+  const dayLabel = day === yday ? `Yesterday · ${fmtDay(day)}` : `Last working day · ${fmtDay(day)} (no store activity yesterday)`
 
   const openSection = () => {
     window.dispatchEvent(new Event(JARVIS_OPEN_EVENT))
@@ -42,7 +55,7 @@ export default function JarvisFootfallCard({ t, isMobile }) {
   } else if (!data && error) {
     body = <div style={{ fontSize: 13, color: t.red }}>Couldn&apos;t load footfall: {error}</div>
   } else if (s.cameras === 0) {
-    body = <div style={{ fontSize: 13, color: t.text3 }}>No camera footfall received for today yet.</div>
+    body = <div style={{ fontSize: 13, color: t.text3 }}>No camera footfall recorded in the last 7 days.</div>
   } else {
     body = (
       <>
@@ -67,7 +80,7 @@ export default function JarvisFootfallCard({ t, isMobile }) {
           {s.genderKnown && <span>♂ {fmtN(s.male)} · ♀ {fmtN(s.female)}{s.unclassified > 0 ? ` · ${fmtN(s.unclassified)} unclassified` : ''}</span>}
           <span>{s.reporting}/{s.cameras} cameras reporting</span>
           {s.offline.length > 0 && <span style={{ color: t.red }}>{s.offline.length} camera{s.offline.length > 1 ? 's' : ''} sent no data</span>}
-          {s.todayPending > 0 && <span>Includes staff until Jarvis&apos; end-of-day staff removal</span>}
+          {s.pendingStaff > 0 && <span style={{ color: t.orange || t.gold }}>Staff not yet removed at {s.pendingStaff} store{s.pendingStaff > 1 ? 's' : ''} — may be overcounted</span>}
           {s.noCamera.length > 0 && <span>{fmtN(s.noCamera.reduce((a, b) => a + b.walkins, 0))} walk-ins at {s.noCamera.length} branches without a camera (not compared)</span>}
         </div>
       </>
@@ -80,7 +93,7 @@ export default function JarvisFootfallCard({ t, isMobile }) {
         <div style={{ width: 32, height: 32, borderRadius: 9, background: `${t.blue}22`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>👥</div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: t.text1 }}>Store footfall vs CRM walk-ins</div>
-          <div style={{ fontSize: 11.5, color: t.text3 }}>Today · Jarvis cameras{synced ? ` · synced ${synced}` : ''}</div>
+          <div style={{ fontSize: 11.5, color: t.text3 }}>{dayLabel} · Jarvis cameras{synced ? ` · synced ${synced}` : ''}</div>
         </div>
         <button onClick={openSection} style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${t.border}`, background: t.card, color: t.text2, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
           Branch breakdown →

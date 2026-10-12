@@ -5,7 +5,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import {
-  useJarvisFootfall, jarvisRange, summarizeFootfall, JARVIS_PERIODS,
+  useJarvisFootfall, jarvisRange, jarvisYesterday, summarizeFootfall, JARVIS_PERIODS,
   punchColor, fmtN, fmtPctR, fmtTime,
 } from './jarvisFootfall'
 import { JARVIS_SECTION_ID, JARVIS_OPEN_EVENT } from './JarvisFootfallCard'
@@ -82,7 +82,8 @@ function DailyChart({ t, days }) {
 
 export default function JarvisFootfallSection({ t, isMobile }) {
   const [open, setOpen] = useState(false)
-  const [period, setPeriod] = useState('today')
+  const [period, setPeriod] = useState('yesterday')
+  const [custom, setCustom] = useState(() => jarvisRange('week'))
   const [region, setRegion] = useState(null)
   const [branch, setBranch] = useState(null)
   const [sort, setSort] = useState('gap')
@@ -94,10 +95,12 @@ export default function JarvisFootfallSection({ t, isMobile }) {
     return () => window.removeEventListener(JARVIS_OPEN_EVENT, onOpen)
   }, [])
 
-  const { from, to } = jarvisRange(period)
+  const range = jarvisRange(period, custom)
+  const { from, to } = range
+  const yday = jarvisYesterday()
   const { data, loading, error, reload } = useJarvisFootfall(open ? from : null, open ? to : null)
-  const rows = data?.rows || []
-  const s = useMemo(() => summarizeFootfall(rows, { region, branch, today: data?.today }), [rows, region, branch, data?.today])
+  const rows = from ? (data?.rows || []) : []
+  const s = useMemo(() => summarizeFootfall(rows, { region, branch }), [rows, region, branch])
   const branchOptions = useMemo(() => [...new Set(rows.filter(r => r.footfall != null && (!region || r.region === region)).map(r => r.branch))].sort(), [rows, region])
   const sortedBranches = useMemo(() => [...s.branches].sort(SORTS[sort]), [s.branches, sort])
   const visibleBranches = showAll ? sortedBranches : sortedBranches.slice(0, 15)
@@ -117,7 +120,9 @@ export default function JarvisFootfallSection({ t, isMobile }) {
 
   let body = null
   if (open) {
-    if (data?.tableMissing) {
+    if (!from) {
+      body = <div style={{ fontSize: 13, color: t.text3 }}>{range.note}. Today is excluded until the day is complete.</div>
+    } else if (data?.tableMissing) {
       body = <div style={{ fontSize: 13, color: t.text3 }}>Footfall storage isn&apos;t set up yet — run <code>sql/jarvis_footfall.sql</code> in the Supabase SQL editor, then data starts filling in within ~20 minutes.</div>
     } else if (!data && loading) {
       body = <div style={{ fontSize: 13, color: t.text3 }}>Loading footfall…</div>
@@ -147,11 +152,9 @@ export default function JarvisFootfallSection({ t, isMobile }) {
             </Tile>
           </div>
 
-          {(s.pendingStaff > 0 || s.todayPending > 0) && (
+          {s.pendingStaff > 0 && (
             <div style={{ marginTop: 10, fontSize: 12, color: t.text2, background: `${t.orange || t.gold}12`, border: `1px solid ${t.orange || t.gold}35`, borderRadius: 10, padding: '8px 12px' }}>
-              {s.pendingStaff > 0 && <>Jarvis hasn&apos;t removed staff from {s.pendingStaff} past store-day{s.pendingStaff > 1 ? 's' : ''} yet, so those footfall counts may be high. </>}
-              {s.todayPending > 0 && <>Today&apos;s footfall includes staff until Jarvis&apos; end-of-day staff removal. </>}
-              Counts update automatically once Jarvis finishes.
+              Jarvis hasn&apos;t removed staff from {s.pendingStaff} store-day{s.pendingStaff > 1 ? 's' : ''} yet, so those footfall counts may be high. They update automatically once Jarvis finishes.
             </div>
           )}
 
@@ -252,7 +255,20 @@ export default function JarvisFootfallSection({ t, isMobile }) {
         <div style={{ padding: isMobile ? '14px 14px 18px' : '18px 24px 22px' }}>
           <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', marginBottom: 8 }}>
             {JARVIS_PERIODS.map(p => <button key={p.key} onClick={() => setPeriod(p.key)} style={pill(period === p.key)}>{p.label}</button>)}
-            <span style={{ fontSize: 11.5, color: t.text3, alignSelf: 'center', marginLeft: 6, whiteSpace: 'nowrap' }}>{from === to ? from : `${from} → ${to}`}</span>
+            {period === 'custom' ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 6, flexShrink: 0 }}>
+                {['from', 'to'].map((k, i) => (
+                  <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    {i === 1 && <span style={{ fontSize: 11.5, color: t.text3 }}>→</span>}
+                    <input type="date" value={custom[k] || ''} max={k === 'from' ? (custom.to || yday) : yday} min={k === 'to' ? custom.from : undefined}
+                      onChange={e => e.target.value && setCustom(c => ({ ...c, [k]: e.target.value }))}
+                      style={{ background: t.card, color: t.text1, border: `1px solid ${t.border}`, borderRadius: 8, padding: '4px 8px', fontSize: 12, colorScheme: 'light dark' }} />
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <span style={{ fontSize: 11.5, color: t.text3, alignSelf: 'center', marginLeft: 6, whiteSpace: 'nowrap' }}>{from ? (from === to ? from : `${from} → ${to}`) : range.note}</span>
+            )}
           </div>
           <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', marginBottom: 14, alignItems: 'center' }}>
             <button onClick={() => { setRegion(null); setBranch(null) }} style={pill(!region)}>All regions</button>

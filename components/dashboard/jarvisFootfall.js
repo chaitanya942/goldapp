@@ -6,34 +6,48 @@ import { useState, useEffect, useCallback } from 'react'
 import { authedFetch } from '../../lib/authedFetch'
 
 export const JARVIS_REFRESH_MS = 5 * 60 * 1000
-export const JARVIS_LIVE_REFRESH_MS = 60 * 1000
 
 const istToday = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10)
 const addDays = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10) }
 
+// Only completed days are shown — today's camera counts are partial (Jarvis
+// publishes in batches and removes staff after close), so every range ends
+// yesterday at the latest.
+export const jarvisYesterday = () => addDays(istToday(), -1)
+
 export const JARVIS_PERIODS = [
-  { key: 'today', label: 'Today' },
   { key: 'yesterday', label: 'Yesterday' },
-  { key: '7d', label: 'Last 7 days' },
-  { key: '15d', label: 'Last 15 days' },
-  { key: 'mtd', label: 'MTD' },
-  { key: 'prev', label: 'Prev Month' },
+  { key: 'week', label: 'Last week' },
+  { key: '2weeks', label: 'Last 2 weeks' },
+  { key: 'month', label: 'This month' },
+  { key: 'prev', label: 'Last month' },
+  { key: 'custom', label: 'Custom' },
 ]
 
-export function jarvisRange(key) {
+// Returns { from, to } (both ≤ yesterday), or { from: null, to: null, note }
+// when the period has no completed day yet.
+export function jarvisRange(key, custom) {
   const today = istToday()
-  const [y, m] = today.split('-').map(Number)
-  if (key === 'yesterday') { const d = addDays(today, -1); return { from: d, to: d } }
-  if (key === '7d') return { from: addDays(today, -6), to: today }
-  if (key === '15d') return { from: addDays(today, -14), to: today }
-  if (key === 'mtd') return { from: `${today.slice(0, 7)}-01`, to: today }
+  const yday = addDays(today, -1)
+  if (key === 'week') return { from: addDays(yday, -6), to: yday }
+  if (key === '2weeks') return { from: addDays(yday, -13), to: yday }
+  if (key === 'month') {
+    const from = `${today.slice(0, 7)}-01`
+    return from > yday ? { from: null, to: null, note: 'No completed day this month yet' } : { from, to: yday }
+  }
   if (key === 'prev') {
+    const [y, m] = today.split('-').map(Number)
     const py = m === 1 ? y - 1 : y, pm = m === 1 ? 12 : m - 1
     const last = new Date(Date.UTC(py, pm, 0)).getUTCDate()
     const mm = String(pm).padStart(2, '0')
     return { from: `${py}-${mm}-01`, to: `${py}-${mm}-${String(last).padStart(2, '0')}` }
   }
-  return { from: today, to: today }
+  if (key === 'custom') {
+    const to = custom?.to && custom.to < yday ? custom.to : yday
+    const from = custom?.from && custom.from <= to ? custom.from : to
+    return { from, to }
+  }
+  return { from: yday, to: yday }
 }
 
 export function useJarvisFootfall(from, to) {
@@ -53,11 +67,8 @@ export function useJarvisFootfall(from, to) {
   useEffect(() => {
     if (!from || !to) return
     load()
-    const live = to >= istToday()
-    const id = setInterval(() => { if (!document.hidden) load(true) }, live ? JARVIS_LIVE_REFRESH_MS : JARVIS_REFRESH_MS)
-    const onFocus = () => { if (!document.hidden) load(true) }
-    document.addEventListener('visibilitychange', onFocus)
-    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onFocus) }
+    const id = setInterval(() => { if (!document.hidden) load(true) }, JARVIS_REFRESH_MS)
+    return () => clearInterval(id)
   }, [load, from, to])
   return { ...state, reload: () => load(true) }
 }
@@ -66,13 +77,11 @@ const walkinsOf = (r) => r.walkins_old + r.walkins_new + r.rewalkins
 
 // Footfall is only compared with walk-ins on branch-days that have camera
 // data, so branches without a Jarvis camera never show up as "not punched".
-export function summarizeFootfall(rows, { region = null, branch = null, today = null } = {}) {
+export function summarizeFootfall(rows, { region = null, branch = null } = {}) {
   const sel = (rows || []).filter(r => (!region || r.region === region) && (!branch || r.branch === branch))
   const cam = sel.filter(r => r.footfall != null)
 
-  // Jarvis removes staff from a day's count only after that day closes, so
-  // today being "pending" is normal — only past days are worth flagging.
-  const t = { footfall: 0, walkins: 0, fresh: 0, rewalkins: 0, male: 0, female: 0, unclassified: 0, genderKnown: false, pendingStaff: 0, todayPending: 0 }
+  const t = { footfall: 0, walkins: 0, fresh: 0, rewalkins: 0, male: 0, female: 0, unclassified: 0, genderKnown: false, pendingStaff: 0 }
   const age = {}
   const byBranch = new Map()
   const byDay = new Map()
@@ -88,10 +97,8 @@ export function summarizeFootfall(rows, { region = null, branch = null, today = 
       t.female += r.female || 0
       t.unclassified += Math.max(0, r.footfall - (r.male || 0) - (r.female || 0))
     }
-    const isToday = !!today && r.date === today
-    const pending = !!r.staff_status && r.staff_status !== 'SUCCESS' && !isToday
+    const pending = !!r.staff_status && r.staff_status !== 'SUCCESS'
     if (pending) t.pendingStaff++
-    if (isToday && r.staff_status && r.staff_status !== 'SUCCESS') t.todayPending++
     if (r.age) for (const [k, v] of Object.entries(r.age)) age[k] = (age[k] || 0) + (Number(v) || 0)
 
     let b = byBranch.get(r.branch)
@@ -100,7 +107,7 @@ export function summarizeFootfall(rows, { region = null, branch = null, today = 
     b.male += r.male || 0; b.female += r.female || 0; b.days++
     if (pending) b.pendingDays++
     if (r.footfall === 0 && w > 0) b.deadDays++
-    if (r.data_status === 'PARTIAL' && (!today || r.date < today)) b.partialDays++
+    if (r.data_status === 'PARTIAL') b.partialDays++
 
     let d = byDay.get(r.date)
     if (!d) { d = { date: r.date, footfall: 0, walkins: 0 }; byDay.set(r.date, d) }
