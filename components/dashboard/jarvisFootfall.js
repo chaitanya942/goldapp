@@ -48,6 +48,11 @@ export function jarvisRange(key, custom) {
     const from = custom?.from && custom.from <= to ? custom.from : to
     return { from, to }
   }
+  // Branches are closed on Sundays, so "Yesterday" on a Monday means Saturday.
+  if (new Date(`${yday}T00:00:00Z`).getUTCDay() === 0) {
+    const sat = addDays(yday, -1)
+    return { from: sat, to: sat, hint: 'Saturday — yesterday was Sunday' }
+  }
   return { from: yday, to: yday }
 }
 

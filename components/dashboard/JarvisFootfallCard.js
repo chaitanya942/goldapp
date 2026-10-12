@@ -36,7 +36,10 @@ export default function JarvisFootfallCard({ t, isMobile }) {
     return active.length ? active.reduce((a, b) => (a > b ? a : b)) : yday
   }, [data, yday])
   const s = useMemo(() => summarizeFootfall((data?.rows || []).filter(r => r.date === day)), [data, day])
-  const dayLabel = day === yday ? `Yesterday · ${fmtDay(day)}` : `Last working day · ${fmtDay(day)} (no store activity yesterday)`
+  const ydayIsSunday = new Date(`${yday}T00:00:00Z`).getUTCDay() === 0
+  const dayLabel = day === yday
+    ? `Yesterday · ${fmtDay(day)}`
+    : ydayIsSunday ? `Saturday · ${fmtDay(day)} (yesterday was Sunday)` : `Last working day · ${fmtDay(day)} (no store activity yesterday)`
 
   const openSection = () => {
     window.dispatchEvent(new Event(JARVIS_OPEN_EVENT))

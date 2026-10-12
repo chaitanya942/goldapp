@@ -267,7 +267,7 @@ export default function JarvisFootfallSection({ t, isMobile }) {
                 ))}
               </span>
             ) : (
-              <span style={{ fontSize: 11.5, color: t.text3, alignSelf: 'center', marginLeft: 6, whiteSpace: 'nowrap' }}>{from ? (from === to ? from : `${from} → ${to}`) : range.note}</span>
+              <span style={{ fontSize: 11.5, color: t.text3, alignSelf: 'center', marginLeft: 6, whiteSpace: 'nowrap' }}>{from ? `${from === to ? from : `${from} → ${to}`}${range.hint ? ` · ${range.hint}` : ''}` : range.note}</span>
             )}
           </div>
           <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', marginBottom: 14, alignItems: 'center' }}>
