@@ -1,96 +1,14 @@
-import mysql from 'mysql2/promise'
 import postgres from 'postgres'
 import { requireAuth, ROLE_GROUPS } from '../../../lib/apiAuth'
 import { newCrmOptsForPostgresPkg } from '../../../lib/newCrmPg'
 
 // Schema explorer — admin-only diagnostic. Exposes table layout + connection
-// state for both old MySQL CRM and new Postgres CRM.
+// state for the New CRM (Postgres).
 export async function GET(req) {
   const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
   if (!auth.ok) return auth.response
 
-  const result = { oldCrm: {}, newCrm: {}, errors: {} }
-
-  // ── OLD CRM (MySQL) ────────────────────────────────────────────────────────
-  let conn
-  try {
-    conn = await mysql.createConnection({
-      host:     process.env.CRM_DB_HOST,
-      port:     parseInt(process.env.CRM_DB_PORT || '3306'),
-      database: process.env.CRM_DB_NAME,
-      user:     process.env.CRM_DB_USER,
-      password: process.env.CRM_DB_PASSWORD,
-      connectTimeout: 10000,
-    })
-
-    // All tables in the database
-    const [tables] = await conn.execute(`
-      SELECT TABLE_NAME, TABLE_ROWS, DATA_LENGTH, CREATE_TIME
-      FROM information_schema.TABLES
-      WHERE TABLE_SCHEMA = DATABASE()
-      ORDER BY TABLE_ROWS DESC
-    `)
-
-    // Schema for every table
-    const schema = {}
-    for (const tbl of tables) {
-      const name = tbl.TABLE_NAME
-      try {
-        const [cols] = await conn.execute(`DESCRIBE \`${name}\``)
-        schema[name] = {
-          columns: cols.map(c => ({ field: c.Field, type: c.Type, key: c.Key, null: c.Null, default: c.Default })),
-          approx_rows: tbl.TABLE_ROWS,
-        }
-      } catch (e) {
-        schema[name] = { error: e.message }
-      }
-    }
-
-    // Sample 3 rows from every table (to understand data shape)
-    const samples = {}
-    for (const tbl of tables) {
-      const name = tbl.TABLE_NAME
-      try {
-        const [rows] = await conn.execute(`SELECT * FROM \`${name}\` ORDER BY 1 DESC LIMIT 3`)
-        samples[name] = rows
-      } catch (e) {
-        samples[name] = { error: e.message }
-      }
-    }
-
-    // Distinct values for key operational fields across ALL tables
-    const distinctValues = {}
-    const fieldQueries = [
-      { tbl: 'transac_tbl',    col: 'trxn_status'    },
-      { tbl: 'transac_tbl',    col: 'type_gold'       },
-      { tbl: 'transac_tbl',    col: 'pymt_mde'        },
-      { tbl: 'transac_tbl',    col: 'txn_rmrk'        },
-      { tbl: 'customer_walkin',col: 'walkin_status'   },
-      { tbl: 'customer_walkin',col: 'walk_reason'     },
-      { tbl: 'customer_walkin',col: 'source'          },
-      { tbl: 'rejctd_tbl',     col: 'rej_rsn'         },
-      { tbl: 'cust_walk_status',col: 'led_status'     },
-      { tbl: 'paymt_trxns',    col: 'pymt_status'     },
-      { tbl: 'paymt_trxns',    col: 'pymt_mode'       },
-      { tbl: 'tkovr_app',      col: 'status'          },
-    ]
-    for (const { tbl, col } of fieldQueries) {
-      try {
-        const [rows] = await conn.execute(
-          `SELECT IFNULL(\`${col}\`,'(null)') val, COUNT(*) cnt FROM \`${tbl}\` GROUP BY \`${col}\` ORDER BY cnt DESC LIMIT 30`
-        )
-        distinctValues[`${tbl}.${col}`] = rows
-      } catch (e) {
-        distinctValues[`${tbl}.${col}`] = { error: e.message }
-      }
-    }
-
-    result.oldCrm = { tableCount: tables.length, tables: tables.map(t => ({ name: t.TABLE_NAME, approx_rows: t.TABLE_ROWS })), schema, samples, distinctValues }
-  } catch (e) {
-    result.errors.oldCrm = e.message
-  } finally {
-    if (conn) await conn.end()
-  }
+  const result = { newCrm: {}, errors: {} }
 
   // ── NEW CRM (PostgreSQL) ───────────────────────────────────────────────────
   let sql

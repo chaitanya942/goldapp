@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import { useApp } from '../../lib/context'
 import PurchaseReports      from './reports/PurchaseReports'
-import PurchaseIntelligence from './intelligence/PurchaseIntelligence'
 
 const THEMES = {
   dark:  { card: '#111111', text1: '#f0e6c8', text3: '#9a8a6a', gold: '#c9a84c', border: '#1e1e1e', purple: '#8c5ac8', blue: '#3a8fbf' },
@@ -12,7 +11,7 @@ const THEMES = {
 
 const TABS = [
   { id: 'analytics',    label: 'Analytics',    icon: '↗', desc: 'Charts, trends, branch performance' },
-  { id: 'intelligence', label: 'Intelligence', icon: '◈', desc: 'Branch health, repeat customers, alerts' },
+  // 'Intelligence' (old-CRM data) is hidden since the old CRM was decoupled.
 ]
 
 export default function ReportsHub() {
@@ -39,7 +38,7 @@ export default function ReportsHub() {
       }}>
         {visibleTabs.map(tab => {
           const isActive = active === tab.id
-          const accent = tab.id === 'intelligence' ? t.purple : t.gold
+          const accent = t.gold
           return (
             <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
               background: 'transparent', border: 'none',
@@ -61,7 +60,6 @@ export default function ReportsHub() {
 
       {/* No extra padding — child components handle their own layout */}
       {active === 'analytics'    && <PurchaseReports />}
-      {active === 'intelligence' && <PurchaseIntelligence />}
     </div>
   )
 }

@@ -47,7 +47,7 @@ export async function GET(req) {
 
   return Response.json({
     from, to,
-    total: counts.total, oldCount: counts.oldCount, newCount: counts.newCount,
+    total: counts.total, newCount: counts.newCount,
     completedCount: counts.completedCount, pendingCount: counts.pendingCount,
     errors,
     csv: '﻿' + lines.join('\r\n'),

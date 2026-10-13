@@ -221,10 +221,10 @@ export default function JarvisFootfallSection({ t, isMobile }) {
 
           <div style={{ marginTop: 10, fontSize: 11, color: t.text3, lineHeight: 1.6 }}>
             Footfall = people counted entering by the Jarvis store camera (includes companions; staff removed once Jarvis&apos; staff-reduction run completes).
-            Walk-ins = old CRM walk-in entries + new CRM transactions opened that day + re-walk-ins (opened earlier, closed that day) — same basis as the Walked-in tile.
+            Walk-ins = CRM transactions opened that day + re-walk-ins (opened earlier, closed that day) — same basis as the Walked-in tile.
             Only branch-days with camera data are compared.
-            {data?.crm && (data.crm.old !== 'ok' || data.crm.new !== 'ok') && (
-              <span style={{ color: t.red }}> CRM source unavailable: {data.crm.old !== 'ok' ? 'old CRM ' : ''}{data.crm.new !== 'ok' ? 'new CRM' : ''} — walk-ins may be understated.</span>
+            {data?.crm && data.crm.new !== 'ok' && (
+              <span style={{ color: t.red }}> CRM unavailable — walk-ins may be understated.</span>
             )}
           </div>
         </>

@@ -10,7 +10,6 @@ import ReportBranches from './ReportBranches'
 import ReportCompare from './ReportCompare'
 import GoldModal from '../../ui/GoldModal'
 import ReportSameDay from './ReportSameDay'
-import ReportCrmInsights from './ReportCrmInsights'
 import ReportComparePeriods from './ReportComparePeriods'
 import ReportUnderperformers from './ReportUnderperformers'
 import { authedFetch } from '../../../lib/authedFetch'
@@ -29,7 +28,6 @@ const SECTIONS = [
   { key: 'underperformers',label: 'Underperformers',icon: '⚠' },
   { key: 'sameday',        label: 'Same Day',       icon: '⊙' },
   { key: 'compare',        label: 'Compare',        icon: '⇄' },
-  { key: 'crm',            label: 'CRM Insights',   icon: '⚡' },
 ]
 
 const EXPORT_COLS = [
@@ -263,7 +261,7 @@ export default function PurchaseReports() {
   // Fire-and-forget sync on mount so reports reflect latest CRM state.
   // Then poll MAX(updated_at) every 30s to surface "Last synced" freshness.
   useEffect(() => {
-    authedFetch('/api/sync-purchases?days=2', { method: 'POST' }).catch(() => null)
+    authedFetch('/api/sync-new-crm', { method: 'POST' }).catch(() => null)
     const fetchLastSync = async () => {
       const { data } = await supabase
         .from('purchases')
@@ -695,7 +693,6 @@ export default function PurchaseReports() {
           {showSection('underperformers') && <ReportUnderperformers t={t} isMobile={isMobile} filterRegion={filterRegion} branches={allBranchMeta} />}
           {showSection('sameday')         && <ReportSameDay         t={t} />}
           {showSection('compare')         && <ReportCompare         t={t} />}
-          {showSection('crm')             && <ReportCrmInsights     t={t} />}
         </>
       )}
 

@@ -31,7 +31,7 @@ export default function JarvisFootfallCard({ t, isMobile }) {
   const { data, loading, error } = useJarvisFootfall(from, to)
   const day = useMemo(() => {
     const active = (data?.rows || [])
-      .filter(r => (r.footfall || 0) > 0 || r.walkins_old + r.walkins_new + r.rewalkins > 0)
+      .filter(r => (r.footfall || 0) > 0 || r.walkins_new + r.rewalkins > 0)
       .map(r => r.date)
     return active.length ? active.reduce((a, b) => (a > b ? a : b)) : yday
   }, [data, yday])

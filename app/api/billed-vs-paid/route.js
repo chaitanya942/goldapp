@@ -24,7 +24,6 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { Client } from 'pg'
-import mysql from 'mysql2/promise'
 import { requireAuthForPage } from '../../../lib/apiAuth'
 import { newCrmSslForPg } from '../../../lib/newCrmPg'
 
@@ -107,32 +106,6 @@ async function newCrmPayments(from, to) {
     }
     return map
   } finally { await client.end() }
-}
-
-// ── OLD CRM (MySQL): customer bank only (no clean paid amount) ────────────────
-async function oldCrmBank(from, to) {
-  const conn = await mysql.createConnection({
-    host: process.env.CRM_DB_HOST, port: parseInt(process.env.CRM_DB_PORT || '3306'),
-    database: process.env.CRM_DB_NAME, user: process.env.CRM_DB_USER, password: process.env.CRM_DB_PASSWORD,
-    connectTimeout: 20000,
-  })
-  try {
-    const [txns] = await conn.query(
-      `SELECT t.id, t.bill_no, t.pmt_bank_name, t.pmt_refno
-         FROM transac_tbl t
-        WHERE t.trxn_status='approved' AND DATE(t.date + INTERVAL 330 MINUTE) BETWEEN ? AND ?`, [from, to])
-    const map = {}
-    if (!txns.length) return map
-    const ids = txns.map(t => String(t.id))
-    const [bnk] = await conn.query(
-      `SELECT trnxnn_id, accn_num, bank_ifsc FROM cust_bnkdet WHERE trnxnn_id IN (${ids.map(() => '?').join(',')})`, ids)
-    const B = {}; bnk.forEach(r => { if (!B[String(r.trnxnn_id)]) B[String(r.trnxnn_id)] = r })
-    for (const t of txns) {
-      const bd = B[String(t.id)] || {}
-      map[norm(t.bill_no)] = { processor: t.pmt_bank_name || '', payRef: t.pmt_refno || '', acctNo: bd.accn_num || '', ifsc: bd.bank_ifsc || '' }
-    }
-    return map
-  } finally { await conn.end() }
 }
 
 // ── RazorpayX payouts — read from the webhook-fed `razorpay_payouts` table ────
@@ -232,15 +205,13 @@ export async function GET(req) {
     if (!data || data.length < 1000) break
   }
 
-  // 2) Payment enrichment from both CRMs + 3) RazorpayX (gated). Each source is
-  //    isolated so one outage can't blank the whole report.
-  const [newMap, oldMap, rzp] = await Promise.all([
+  // 2) Payment enrichment from the New CRM + 3) RazorpayX (gated). Each source
+  //    is isolated so one outage can't blank the whole report.
+  const [newMap, rzp] = await Promise.all([
     newCrmPayments(from, to).catch(e => ({ __err: e.message })),
-    oldCrmBank(from, to).catch(e => ({ __err: e.message })),
     razorpayPayouts(from, to).catch(e => ({ linked: false, list: [], byUtr: {}, byRef: {}, error: e.message })),
   ])
   const newErr = newMap.__err || null
-  const oldErr = oldMap.__err || null
 
   const rows = []
   for (const p of master) {
@@ -248,7 +219,6 @@ export async function GET(req) {
     const isNew = (p.crm_source || '').includes('new')
     const billed = Number(p.final_amount_crm) || 0
     const np = !newMap.__err ? newMap[key] : null
-    const op = !oldMap.__err ? oldMap[key] : null
 
     let paidCrm = null, penny = null, release = null, final = null, processor = '', utrs = [],
         finAcct = '', finIfsc = '', penAcct = '', penIfsc = '', acctMatch = null
@@ -282,10 +252,6 @@ export async function GET(req) {
           payoutAcctMatch = ver ? matched.every(po => !po.benef_acct || norm(po.benef_acct) === ver) : null
         }
       }
-    } else if (!isNew && op) {
-      processor = op.processor
-      utrs      = op.payRef ? [op.payRef] : []
-      penAcct   = op.acctNo; penIfsc = op.ifsc   // old CRM: only the customer bank is known
     }
 
     const paid = paidBank != null ? paidBank : paidCrm
@@ -323,6 +289,6 @@ export async function GET(req) {
   return Response.json({
     from, to, rows, summary,
     razorpay_linked: !!rzp.linked,
-    warnings: [newErr && `New CRM: ${newErr}`, oldErr && `Old CRM: ${oldErr}`, rzp.error && `Razorpay: ${rzp.error}`].filter(Boolean),
+    warnings: [newErr && `New CRM: ${newErr}`, rzp.error && `Razorpay: ${rzp.error}`].filter(Boolean),
   })
 }

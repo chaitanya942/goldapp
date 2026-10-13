@@ -8,7 +8,7 @@ import { requireAuth } from '../../../lib/apiAuth'
 import { canSeeJarvis } from '../../../lib/jarvisAccess'
 import { getAllowedRegionsForAuth } from '../../../lib/regionScope'
 import { selectAllRows } from '../../../lib/supabaseAll'
-import { oldCrmWalkins, newCrmWalkins, mergeFootfallRows } from '../../../lib/jarvisFootfallData'
+import { newCrmWalkins, mergeFootfallRows } from '../../../lib/jarvisFootfallData'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -52,7 +52,7 @@ export async function GET(req) {
   const hit = cache.get(cacheKey)
   if (hit && Date.now() - hit.ts < CACHE_TTL_MS) return Response.json({ ...hit.data, cached: true })
 
-  const { data: branches, error: brErr } = await supabase.from('branches').select('name, region, crm_branch_id')
+  const { data: branches, error: brErr } = await supabase.from('branches').select('name, region')
   if (brErr) return Response.json({ error: brErr.message }, { status: 500 })
 
   let footfall = []
@@ -67,21 +67,16 @@ export async function GET(req) {
     else return Response.json({ error: err.message }, { status: 500 })
   }
 
-  const [oldRes, newRes, lastSync] = await Promise.allSettled([
-    oldCrmWalkins(from, to),
+  const [newRes, lastSync] = await Promise.allSettled([
     newCrmWalkins(from, to),
     tableMissing ? Promise.resolve(null) : supabase.from('jarvis_footfall').select('fetched_at').order('fetched_at', { ascending: false }).limit(1),
   ])
 
   const rows = mergeFootfallRows({
     branches, footfall, from, to, allowedRegions,
-    oldRows: oldRes.status === 'fulfilled' ? oldRes.value : null,
     newRows: newRes.status === 'fulfilled' ? newRes.value : null,
   })
-  const crm = {
-    old: oldRes.status === 'fulfilled' ? 'ok' : (oldRes.reason?.message || 'unavailable'),
-    new: newRes.status === 'fulfilled' ? 'ok' : (newRes.reason?.message || 'unavailable'),
-  }
+  const crm = { new: newRes.status === 'fulfilled' ? 'ok' : (newRes.reason?.message || 'unavailable') }
   const lastSyncedAt = lastSync.status === 'fulfilled' ? lastSync.value?.data?.[0]?.fetched_at || null : null
 
   const data = { from, to, today, tableMissing, lastSyncedAt, crm, rows }

@@ -30,7 +30,7 @@ export default function PurchaseRegister() {
   const [from, setFrom] = useState(today)
   const [to,   setTo]   = useState(today)
   const [loading, setLoading] = useState(false)
-  const [res, setRes] = useState(null)   // { total, oldCount, newCount, csv, errors, from, to }
+  const [res, setRes] = useState(null)   // { total, newCount, csv, errors, from, to }
   const [err, setErr] = useState(null)
 
   const run = useCallback(async (f = from, t2 = to) => {
@@ -138,7 +138,6 @@ export default function PurchaseRegister() {
             {stat('Completed', res.completedCount ?? '—', t.green || '#3aaa6a')}
             {stat('Payment pending', res.pendingCount ?? '—', t.orange || '#e58a3b')}
             {stat('New CRM', res.newCount, t.blue)}
-            {stat('Old CRM', res.oldCount, t.text2)}
           </div>
 
           {res.errors && (

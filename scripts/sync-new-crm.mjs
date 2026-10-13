@@ -283,7 +283,7 @@ async function main() {
 
   // Pipeline auto-attach — this sync brings Bangalore bills in, so close any
   // owed pipeline against them right away (no-overshoot) instead of waiting for
-  // a /api/sync-purchases run or the 23:30 EOD job. Non-fatal.
+  // the next sync tick or the 23:30 EOD job. Non-fatal.
   try {
     const { data: rows, error } = await supabase.rpc('process_pipeline_attachments')
     if (error) console.warn('⚠️  pipeline auto-attach failed (non-fatal):', error.message)

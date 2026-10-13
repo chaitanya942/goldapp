@@ -12,12 +12,12 @@ import { appIdVariants } from '../../lib/appIdSearch'
 // Cache key for a page query — covers every input that changes the result set,
 // so a re-open with the same filters paints instantly from memory.
 function pageCacheKey(p) {
-  return `pd:page:${p.page}|${p.search}|${p.filterCrmStatus}|${p.filterCrmSource}|${p.filterStatus}|${p.filterBranch}|${p.filterTxn}|${p.fromDate}|${p.toDate}|${p.dispatchedFrom}|${p.dispatchedTo}|${p.sortCol}|${p.sortDir}`
+  return `pd:page:${p.page}|${p.search}|${p.filterCrmStatus}|${p.filterStatus}|${p.filterBranch}|${p.filterTxn}|${p.fromDate}|${p.toDate}|${p.dispatchedFrom}|${p.dispatchedTo}|${p.sortCol}|${p.sortDir}`
 }
 // Default (no-filter, page 0) key — what the user sees when they first open
 // the module. Seeding state from this makes the common re-open instant.
 const DEFAULT_PAGE_KEY = pageCacheKey({
-  page: 0, search: '', filterCrmStatus: '', filterCrmSource: '', filterStatus: '',
+  page: 0, search: '', filterCrmStatus: '', filterStatus: '',
   filterBranch: '', filterTxn: '', fromDate: '', toDate: '', dispatchedFrom: '',
   dispatchedTo: '', sortCol: 'purchase_date', sortDir: 'desc',
 })
@@ -37,10 +37,6 @@ const CRM_STATUS = {
   rejected: { label: 'Rejected', color: 'red'    },
 }
 
-const CRM_SOURCE = {
-  old_crm: { label: 'Old CRM', color: 'dim'    },
-  new_crm: { label: 'NEW CRM', color: 'purple' },
-}
 
 function fmtTime(t) {
   if (!t) return '—'
@@ -180,7 +176,6 @@ export default function PurchaseData() {
   const [search, setSearch]           = useState('')   // debounced — drives the query
   const [searchInput, setSearchInput] = useState('')   // immediate — bound to the input
   const [filterCrmStatus, setFilterCrmStatus] = useState('')
-  const [filterCrmSource, setFilterCrmSource] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [filterBranch, setFilterBranch] = useState('')
   const [filterTxn, setFilterTxn]     = useState('')
@@ -201,7 +196,6 @@ export default function PurchaseData() {
   const [sortDir, setSortDir] = useState('desc')
 
   const [kpis, setKpis] = useState(() => getCache('pd:kpis:') ?? null)
-  const [bothCrmIds, setBothCrmIds] = useState(cachedPage?.bothCrmIds ?? new Set())
   const [loadError, setLoadError]   = useState(null)
   // Bumped by load() to force a reload even when page/filters are unchanged
   // (e.g. after a delete). Drives the page + KPI effects.
@@ -245,7 +239,7 @@ export default function PurchaseData() {
     return () => clearTimeout(id)
   }, [searchInput])
 
-  useEffect(() => { loadPage(page) }, [page, search, filterCrmStatus, filterCrmSource, filterStatus, filterBranch, filterTxn, fromDate, toDate, dispatchedFrom, dispatchedTo, sortCol, sortDir, refreshNonce])
+  useEffect(() => { loadPage(page) }, [page, search, filterCrmStatus, filterStatus, filterBranch, filterTxn, fromDate, toDate, dispatchedFrom, dispatchedTo, sortCol, sortDir, refreshNonce])
   useEffect(() => { loadKpis(filterCrmStatus) }, [filterCrmStatus, refreshNonce])
 
   const loadKpis = async (crmStatus = '') => {
@@ -269,7 +263,6 @@ export default function PurchaseData() {
       q = q.or(`customer_name.ilike.%${search}%,${appIdOr},branch_name.ilike.%${search}%`)
     }
     if (filterCrmStatus)   q = q.eq('crm_status', filterCrmStatus)
-    if (filterCrmSource)   q = q.eq('crm_source', filterCrmSource)
     if (filterStatus)      q = q.eq('stock_status', filterStatus)
     if (filterBranch) q = q.eq('branch_name', filterBranch)
     if (filterTxn)    q = q.eq('transaction_type', filterTxn)
@@ -302,38 +295,13 @@ export default function PurchaseData() {
       setLoading(false)
       return
     }
-    const cacheKey      = pageCacheKey({ page: pageNum, search, filterCrmStatus, filterCrmSource, filterStatus, filterBranch, filterTxn, fromDate, toDate, dispatchedFrom, dispatchedTo, sortCol, sortDir })
+    const cacheKey      = pageCacheKey({ page: pageNum, search, filterCrmStatus, filterStatus, filterBranch, filterTxn, fromDate, toDate, dispatchedFrom, dispatchedTo, sortCol, sortDir })
     const resolvedCount = (count !== null && count !== undefined) ? count : totalCount
     setPurchases(data || [])
     if (count !== null && count !== undefined) setTotalCount(count)
     setSelectedIds(new Set())
-    // Reveal the table now — don't make the user wait on the secondary
-    // "Both CRMs" badge query below.
     setLoading(false)
-    setCache(cacheKey, { purchases: data || [], totalCount: resolvedCount, bothCrmIds: new Set() })
-
-    // Flag application_ids that genuinely exist in BOTH CRMs — i.e. the set
-    // of distinct crm_source values for that id has size > 1. Runs after the
-    // table is already visible.
-    const ids = (data || []).map(r => r.application_id).filter(Boolean)
-    if (ids.length) {
-      const { data: both } = await supabase
-        .from('purchases')
-        .select('application_id, crm_source')
-        .in('application_id', ids)
-        .eq('is_deleted', false)
-        .neq('crm_status', 'deleted')
-      if (seq !== reqSeqRef.current) return
-      if (both) {
-        const sources = {}
-        both.forEach(r => {
-          ;(sources[r.application_id] ||= new Set()).add(r.crm_source)
-        })
-        const bothSet = new Set(Object.keys(sources).filter(id => sources[id].size > 1))
-        setBothCrmIds(bothSet)
-        setCache(cacheKey, { purchases: data || [], totalCount: resolvedCount, bothCrmIds: bothSet })
-      }
-    }
+    setCache(cacheKey, { purchases: data || [], totalCount: resolvedCount })
   }
 
   const handleSort = (col) => {
@@ -360,7 +328,7 @@ export default function PurchaseData() {
     setFromDate(from); setToDate(to); setPage(0)
   }
   const setThisMonth = () => { const now = istNow(); setFromDate(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`); setToDate(istStr(now)); setPage(0) }
-  const clearFilters = () => { setFromDate(''); setToDate(''); setDispatchedFrom(''); setDispatchedTo(''); setFilterBranch(''); setFilterStatus(''); setFilterTxn(''); setSearch(''); setSearchInput(''); setFilterCrmStatus(''); setFilterCrmSource(''); setPage(0) }
+  const clearFilters = () => { setFromDate(''); setToDate(''); setDispatchedFrom(''); setDispatchedTo(''); setFilterBranch(''); setFilterStatus(''); setFilterTxn(''); setSearch(''); setSearchInput(''); setFilterCrmStatus(''); setPage(0) }
 
   const handleExport = async (format) => {
     setExporting(true)
@@ -453,7 +421,7 @@ export default function PurchaseData() {
         </div>
         <div style={{ fontSize: '.72rem', color: t.red, textAlign: 'center', marginBottom: '28px', lineHeight: 1.7 }}>
           {deleteAllMode
-            ? <>Permanently deletes <strong>ALL {totalCount.toLocaleString('en-IN')}</strong> purchase records{(filterBranch || filterStatus || search || filterCrmStatus || filterCrmSource || filterTxn || fromDate || toDate || dispatchedFrom || dispatchedTo) ? ' matching current filters' : ''}.<br />This cannot be undone.</>
+            ? <>Permanently deletes <strong>ALL {totalCount.toLocaleString('en-IN')}</strong> purchase records{(filterBranch || filterStatus || search || filterCrmStatus || filterTxn || fromDate || toDate || dispatchedFrom || dispatchedTo) ? ' matching current filters' : ''}.<br />This cannot be undone.</>
             : <>Permanently deletes <strong>{selectedIds.size}</strong> purchase {selectedIds.size === 1 ? 'record' : 'records'}.<br />This cannot be undone.</>}
         </div>
         <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
@@ -552,7 +520,7 @@ export default function PurchaseData() {
         )
       })()}
 
-      {/* FILTER CHIPS — CRM source · status · quick dates. On mobile this is a
+      {/* FILTER CHIPS — status · quick dates. On mobile this is a
           single horizontal-scroll strip (swipe) instead of a tall wrapped wall. */}
       <div className={isMobile ? 'hstrip' : undefined} style={{
         display: 'flex', gap: '8px', alignItems: 'center',
@@ -561,32 +529,6 @@ export default function PurchaseData() {
         marginBottom: '16px',
         ...(isMobile ? { margin: '0 -16px 14px', padding: '0 16px' } : {}),
       }}>
-        {[
-          { key: '',        label: 'All Sources' },
-          { key: 'old_crm', label: 'Old CRM' },
-          { key: 'new_crm', label: 'NEW CRM' },
-        ].map(({ key, label }) => {
-          const active = filterCrmSource === key
-          const accent = key === 'new_crm' ? t.purple : key === 'old_crm' ? t.text3 : t.gold
-          return (
-            <button key={key}
-              onClick={() => { setFilterCrmSource(key); setPage(0) }}
-              style={{
-                padding: '5px 16px', borderRadius: '100px',
-                border: `1px solid ${active ? accent : t.border}`,
-                background: active ? `${accent}18` : 'transparent',
-                color: active ? accent : t.text3,
-                fontSize: '.68rem', fontWeight: active ? 600 : 400,
-                letterSpacing: '.05em', cursor: 'pointer', transition: 'all .15s',
-              }}
-              onMouseEnter={e => { if (!active) { e.currentTarget.style.borderColor = accent; e.currentTarget.style.color = accent } }}
-              onMouseLeave={e => { if (!active) { e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.text3 } }}
-            >
-              {label}
-            </button>
-          )
-        })}
-        <div style={{ width: '1px', height: '18px', background: t.border, margin: '0 6px', flexShrink: 0 }} />
         {[
           { key: '',         label: 'All Data' },
           { key: 'approved', label: 'Approved' },
@@ -639,7 +581,7 @@ export default function PurchaseData() {
           <span style={{ fontSize: '.68rem', color: t.text4 }}>→</span>
           <input type="date" style={{ ...s.select, width: 'auto' }} value={toDate} onChange={e => { setToDate(e.target.value); setPage(0) }} />
         </div>
-        {(fromDate || toDate || filterBranch || filterStatus || filterTxn || search || filterCrmStatus || filterCrmSource) && (
+        {(fromDate || toDate || filterBranch || filterStatus || filterTxn || search || filterCrmStatus) && (
           <button onClick={clearFilters}
             style={{ padding: '6px 12px', borderRadius: '100px', border: `1px solid ${t.red}40`, background: 'transparent', color: t.red, fontSize: '.65rem', cursor: 'pointer' }}>
             Clear all
@@ -886,8 +828,6 @@ export default function PurchaseData() {
                           const cs = CRM_STATUS[p.crm_status?.toLowerCase()] || { label: p.crm_status || 'approved', color: 'green' }
                           return <Badge label={cs.label} color={cs.color} />
                         })()}
-                        {p.crm_source === 'new_crm' && <Badge label="NEW CRM" color="purple" />}
-                        {bothCrmIds.has(p.application_id) && <Badge label="Both CRMs" color="gold" />}
                       </div>
                     </td>
                     {/* Booking status — a bill counts as "booked" when either:

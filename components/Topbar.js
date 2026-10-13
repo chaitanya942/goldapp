@@ -288,8 +288,7 @@ export default function Topbar({ onMenuToggle, isMobile }) {
   const handleSync = async () => {
     setSyncing(true)
     try {
-      // days=2: sync last 2 days only — fast enough for Vercel free plan (< 5s vs 18s for 7 days)
-      const res  = await authedFetch('/api/sync-purchases?days=2', { method: 'POST' })
+      const res  = await authedFetch('/api/sync-new-crm', { method: 'POST' })
       const data = await res.json()
       if (data.success) {
         setToast({ msg: `${data.synced} records synced`, type: 'success' })

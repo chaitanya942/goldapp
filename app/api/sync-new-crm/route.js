@@ -52,6 +52,22 @@ function fmtTime(ts) {
 }
 
 // Extracted body so the cron GET handler can call it without tripping user auth.
+// Pipeline auto-attach — close any owed booking pipeline against bills already
+// in purchases (no-overshoot). This sync is now the only CRM sync, so it runs
+// on every tick, including ticks with no new transactions (a new booking can
+// still need existing bills). Non-fatal: never fails the sync.
+async function attachPipelines() {
+  try {
+    const { data: attachRows, error: attachErr } = await supabaseAdmin.rpc('process_pipeline_attachments')
+    if (attachErr) console.warn('[sync-new-crm] process_pipeline_attachments failed (non-fatal):', attachErr.message)
+    else if (Array.isArray(attachRows) && attachRows.length) {
+      const bills = attachRows.reduce((s, r) => s + Number(r.bills_attached || 0), 0)
+      const wt    = attachRows.reduce((s, r) => s + Number(r.weight_attached || 0), 0)
+      console.log(`[sync-new-crm] pipeline auto-attach: ${attachRows.length} booking(s), ${bills} bill(s), ${wt.toFixed(2)}g`)
+    }
+  } catch (paErr) { console.warn('[sync-new-crm] pipeline auto-attach threw (non-fatal):', paErr?.message) }
+}
+
 async function runSync(request) {
   // ── New CRM not live yet — wipe any test data and skip sync ────────────────
   if (!NEW_CRM_LIVE_DATE) {
@@ -192,6 +208,7 @@ async function runSync(request) {
 
     if (!rows.length) {
       await recordSyncSuccess(supabaseAdmin, 'new_crm', 0)
+      await attachPipelines()
       return Response.json({ success: true, message: 'No new CRM records found', synced: 0, newCount: 0 })
     }
 
@@ -304,19 +321,7 @@ async function runSync(request) {
     // separately in failedIds; they don't mean the sync is down.
     await recordSyncSuccess(supabaseAdmin, 'new_crm', synced)
 
-    // Pipeline auto-attach — the New-CRM sync is what brings Bangalore bills in,
-    // so close any owed pipeline against them immediately (no-overshoot). Without
-    // this the pipeline waits for a /api/sync-purchases run or the 23:30 EOD job.
-    // Non-fatal: a failure here never fails the sync.
-    try {
-      const { data: attachRows, error: attachErr } = await supabaseAdmin.rpc('process_pipeline_attachments')
-      if (attachErr) console.warn('[sync-new-crm] process_pipeline_attachments failed (non-fatal):', attachErr.message)
-      else if (Array.isArray(attachRows) && attachRows.length) {
-        const bills = attachRows.reduce((s, r) => s + Number(r.bills_attached || 0), 0)
-        const wt    = attachRows.reduce((s, r) => s + Number(r.weight_attached || 0), 0)
-        console.log(`[sync-new-crm] pipeline auto-attach: ${attachRows.length} booking(s), ${bills} bill(s), ${wt.toFixed(2)}g`)
-      }
-    } catch (paErr) { console.warn('[sync-new-crm] pipeline auto-attach threw (non-fatal):', paErr?.message) }
+    await attachPipelines()
 
     // ── Ghost reconcile ──────────────────────────────────────────────────────
     // The upsert above never notices when a previously-synced bill is later

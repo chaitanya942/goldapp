@@ -76,12 +76,14 @@ async function handleGet(req) {
         .from('purchases')
         .select(COLS)
         .not('count_received_at', 'is', null)
+        .or('crm_status.is.null,crm_status.neq.archived_old_crm')   // old-CRM bills are archived (hidden)
         .order('count_received_at', { ascending: false })
         .limit(limit),
       supabase
         .from('purchases')
         .select(COLS)
         .not('audited_at', 'is', null)
+        .or('crm_status.is.null,crm_status.neq.archived_old_crm')   // old-CRM bills are archived (hidden)
         .order('audited_at', { ascending: false })
         .limit(limit),
     ])
@@ -175,6 +177,7 @@ async function handleGet(req) {
         .from('purchases')
         .select(COLS)
         .not('audited_at', 'is', null)
+        .or('crm_status.is.null,crm_status.neq.archived_old_crm')   // old-CRM bills are archived (hidden)
         .order('audited_at', { ascending: false })
       if (from) q = q.gte('audited_at', `${from}T19:30:00+05:30`)
       if (to)   q = q.lt ('audited_at', `${addDay(to)}T19:30:00+05:30`)

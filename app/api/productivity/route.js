@@ -1,18 +1,16 @@
 // app/api/productivity/route.js
 //
 // Data engine for the Productivity module (gated to a hard email allowlist —
-// see PAGE_EMAIL_ALLOWLIST). Reconstructs per-case stage timelines from both
-// CRMs and serves them LIVE, FILTERABLE, and COMPARABLE.
+// see PAGE_EMAIL_ALLOWLIST). Reconstructs per-case stage timelines from the
+// New CRM and serves them LIVE and FILTERABLE (the old CRM is decoupled).
 //
-// NEW CRM (>=15 Jun) — full 7-stage timeline from artifact timestamps
+// Full 7-stage timeline from artifact timestamps
 //   (Transaction/Estimation/Quotation/Kyc+KycLog/Payment/Order/Release/Agreement):
 //   1 Valuation · 2 Estimation+nego · 3 Quotation prep · 4 Quotation approval ·
 //   5 KYC maker→checker · 6 Payment · 7 Order→completion.
-// OLD CRM (<=14 Jun) — walk-in → approval → payout (2 stages + total).
 //
 // Query params:
 //   action  report | people | case
-//   source  new | old | compare | auto(default, by date)
 //   from,to date window (purchase/walk-in date, IST)
 //   bucket  day | week                      (trend granularity)
 //   groupBy state|region|branch|type|stone|ornaments|employee|status
@@ -23,19 +21,11 @@
 // "where time goes" split, a grouped breakdown by ANY dimension, a day/week
 // trend, WIP stuck-by-status (NEW), facets, and a capped case list.
 
-import mysql from 'mysql2/promise'
 import pg from 'pg'
 import { requireAuthForPage } from '../../../lib/apiAuth'
 import { newCrmSslForPg } from '../../../lib/newCrmPg'
 
-const CUTOVER = '2026-06-15'
-
 // ── pools ────────────────────────────────────────────────────────────────────
-let _my = null
-function myPool() {
-  if (!_my) _my = mysql.createPool({ host: process.env.CRM_DB_HOST, port: parseInt(process.env.CRM_DB_PORT || '3306'), database: process.env.CRM_DB_NAME, user: process.env.CRM_DB_USER, password: process.env.CRM_DB_PASSWORD, waitForConnections: true, connectionLimit: 3, connectTimeout: 20000 })
-  return _my
-}
 let _pg = null
 function pgPool() {
   if (!_pg) {
@@ -116,7 +106,6 @@ const NEW_STAGES = [
   { key: 'quoprep', label: '3 · Quotation prep' }, { key: 'quoappr', label: '4 · Quotation approval' },
   { key: 'kyc', label: '5 · KYC maker → checker' }, { key: 'pay', label: '6 · Payment' }, { key: 'order', label: '7 · Order → completion' },
 ]
-const OLD_STAGES = [{ key: 'process', label: '1 · Walk-in → approval' }, { key: 'payout', label: '2 · Approval → payout' }]
 const DIM = { state: 'state', region: 'region', branch: 'branch', type: 'type', stone: 'stone', ornaments: 'ornBucket', employee: 'opener', status: 'status' }
 const FILTERS = { state: 'state', region: 'region', branch: 'branch', type: 'type', stone: 'stone', ornaments: 'ornBucket', status: 'status', employee: 'opener' }
 
@@ -176,37 +165,6 @@ async function newCrmPull(from, to) {
   })
 }
 
-// ── OLD CRM pull (comparable) ────────────────────────────────────────────────
-async function oldCrmPull(from, to) {
-  const p = myPool()
-  const TAT = 'TIMESTAMPDIFF(MINUTE, TIMESTAMP(t.date,t.time), TIMESTAMP(t.pmt_date,t.pmt_time))'
-  const [emps] = await p.query(`SELECT employee_code ec, TRIM(CONCAT(COALESCE(first_name,''),' ',COALESCE(last_name,''))) nm FROM mst_employee`)
-  const eMap = {}; emps.forEach(e => { if (e.ec) eMap[e.ec] = e.nm || e.ec })
-  const [rows] = await p.query(
-    `SELECT t.bill_no code, t.type_gold, COALESCE(NULLIF(t.tkvr_amnt,''),'0')+0 tkvr, b.state bstate, b.brnch_name branch, t.brnch_emp opener_code,
-        UNIX_TIMESTAMP(TIMESTAMP(t.date,t.time)) walkin_s,
-        UNIX_TIMESTAMP(TIMESTAMP(t.pmt_date,t.pymt_ap_time)) appr_s,
-        UNIX_TIMESTAMP(TIMESTAMP(t.pmt_date,t.pmt_time)) pay_s,
-        DATE_FORMAT(t.date,'%Y-%m-%d') opened_date, DATE_FORMAT(t.time,'%H:%i') opened_ist,
-        CAST(o.num_ornmnts AS UNSIGNED) orncnt, CAST(o.stnt_wet AS DECIMAL(10,3)) stone_wt
-     FROM transac_tbl t JOIN ornments_tbl o ON o.trnxnn_id=t.bill_no JOIN branch_tbl b ON b.brnch_id=t.branch_id
-     WHERE t.date BETWEEN ? AND ? AND t.pmt_date IS NOT NULL AND ${TAT} BETWEEN 0 AND 1440`, [from, to])
-  return rows.map(r => {
-    const state = normState(r.bstate, r.branch)
-    const total = dmin(r.walkin_s, r.pay_s), process = dmin(r.walkin_s, r.appr_s), payout = dmin(r.appr_s, r.pay_s)
-    const opener = eMap[r.opener_code] || r.opener_code || '—'
-    return {
-      code: String(r.code), status: 'COMPLETED', type: (r.type_gold === 'released' || r.tkvr > 0) ? 'TAKEOVER' : 'PHYSICAL',
-      state, region: regionOf(state), branch: r.branch || '—',
-      stone: Number(r.stone_wt) > 0 ? 'with_stone' : 'no_stone', ornCnt: r.orncnt == null ? null : Number(r.orncnt), ornBucket: ornBucket(r.orncnt == null ? null : Number(r.orncnt)),
-      opener, openedDate: r.opened_date, openedIst: r.opened_ist, ageMin: null, completed: true,
-      stages: { process, payout }, total, owner: '—',
-      handlers: { process: opener, payout: opener },
-    }
-  })
-}
-
-// ── aggregation ──────────────────────────────────────────────────────────────
 function applyFilters(cases, f) { return cases.filter(c => Object.entries(FILTERS).every(([k, field]) => !f[k] || String(c[field]) === f[k])) }
 function stageMedians(rows, stageMeta) {
   const out = {}
@@ -319,8 +277,7 @@ export async function GET(req) {
   const from = sp.get('from') || '2026-06-15'
   const to = sp.get('to') || '2026-06-30'
   const bucket = sp.get('bucket') === 'week' ? 'week' : 'day'
-  let source = sp.get('source') || 'auto'
-  if (source === 'auto') source = to < CUTOVER ? 'old' : (from < CUTOVER ? 'compare' : 'new')
+  const source = 'new'
   const filt = { state: sp.get('state'), region: sp.get('region'), branch: sp.get('branch'), type: sp.get('type'), stone: sp.get('stone'), ornaments: sp.get('ornaments'), status: sp.get('status'), employee: sp.get('employee') }
 
   try {
@@ -339,10 +296,7 @@ export async function GET(req) {
     const slaMin = sp.get('sla') ? Math.max(0, parseFloat(sp.get('sla'))) : null
     const opts = { groupByKey, bucket, filt, splitBy, metric, slaMin }
     const out = { source, window: { from, to }, bucket, metric, splitBy, sources: {} }
-    const tasks = []
-    if (source === 'new' || source === 'compare') tasks.push(withPgRetry(() => newCrmPull(from, to)).then(c => { out.sources.new = buildReport(c, { ...opts, stageMeta: NEW_STAGES, isNew: true }) }))
-    if (source === 'old' || source === 'compare') tasks.push(oldCrmPull(from, to).then(c => { out.sources.old = buildReport(c, { ...opts, stageMeta: OLD_STAGES, isNew: false }) }))
-    await Promise.all(tasks)
+    out.sources.new = buildReport(await withPgRetry(() => newCrmPull(from, to)), { ...opts, stageMeta: NEW_STAGES, isNew: true })
     return Response.json(out)
   } catch (err) {
     console.error('[productivity] error:', err)

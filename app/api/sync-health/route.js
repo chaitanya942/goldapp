@@ -19,7 +19,6 @@ const STALE_MINUTES = 10
 // (e.g. the worker has never run since deploy) is reported as missing+stale.
 const EXPECTED = [
   { name: 'new_crm', label: 'New CRM sync' },
-  { name: 'old_crm', label: 'Old CRM sync' },
 ]
 
 export async function GET(req) {

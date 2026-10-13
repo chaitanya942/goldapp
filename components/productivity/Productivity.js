@@ -5,7 +5,7 @@
 // refine one knob at a time — the controls read like a sentence:
 //   "<Metric> by <Rows>, split by <Columns> — <Source> · <dates>"
 // e.g. Median TAT by State, split by Stone — NEW CRM · 15→30 Jun. Change Rows to
-// Branch, or Columns to none, or add a filter, or flip to Compare — nothing else
+// Branch, or Columns to none, or add a filter — nothing else
 // moves. Heavy views (distribution, SLA, leaderboard) live in their own tabs so
 // the screen is never crammed.
 
@@ -35,7 +35,7 @@ export default function Productivity() {
   const td = { padding: '7px 11px', fontSize: 12, color: t.text2, borderBottom: `1px solid ${t.border}55`, whiteSpace: 'nowrap' }
   const inp = { background: t.card2, border: `1px solid ${t.border}`, borderRadius: 7, padding: '5px 8px', fontSize: 11.5, color: t.text1 }
 
-  const [source, setSource] = useState('new')
+  const source = 'new'
   const [from, setFrom] = useState('2026-06-15')
   const [to, setTo] = useState('2026-06-30')
   const [bucket, setBucket] = useState('day')
@@ -58,7 +58,7 @@ export default function Productivity() {
       if (!raw) return
       sessionStorage.removeItem('productivity_prefilter')
       const pf = JSON.parse(raw)
-      if (pf?.employee) { setSource('new'); setGroupBy('employee'); setFilters(f => ({ ...f, employee: pf.employee })); setTab('people') }
+      if (pf?.employee) { setGroupBy('employee'); setFilters(f => ({ ...f, employee: pf.employee })); setTab('people') }
     } catch {}
   }, [])
 
@@ -78,7 +78,7 @@ export default function Productivity() {
 
   const openCase = async (code) => { setDetail({ loading: true, code }); try { const r = await authedFetch(`/api/productivity?action=case&code=${encodeURIComponent(code)}`); const j = await r.json(); setDetail(j.detail || { error: j.error || 'not found', code }) } catch (e) { setDetail({ error: e.message, code }) } }
 
-  const reports = useMemo(() => { if (!data?.sources) return []; const o = []; if (data.sources.new) o.push({ label: 'NEW CRM', rep: data.sources.new }); if (data.sources.old) o.push({ label: 'OLD CRM', rep: data.sources.old }); return o }, [data])
+  const reports = useMemo(() => { if (!data?.sources) return []; const o = []; if (data.sources.new) o.push({ label: 'NEW CRM', rep: data.sources.new }); return o }, [data])
   const facets = reports[0]?.rep.facets || {}
 
   const exportCsv = () => {
@@ -118,7 +118,6 @@ export default function Productivity() {
           <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '.08em', color: t.red, background: `${t.red}16`, border: `1px solid ${t.red}40`, borderRadius: 5, padding: '2px 8px' }}>🔒 RESTRICTED</span>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {['new', 'old', 'compare'].map(v => <button key={v} onClick={() => setSource(v)} style={{ background: source === v ? t.gold : 'transparent', color: source === v ? '#1a0a00' : t.text2, border: `1px solid ${source === v ? t.gold : t.border}`, borderRadius: 8, padding: '6px 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>{v === 'new' ? 'NEW only' : v === 'old' ? 'OLD only' : 'Compare'}</button>)}
           <button onClick={exportCsv} disabled={!reports.length} style={{ background: 'transparent', color: t.text2, border: `1px solid ${t.border}`, borderRadius: 7, padding: '6px 11px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>⬇ CSV</button>
         </div>
       </div>
@@ -152,7 +151,7 @@ export default function Productivity() {
       <div style={{ fontSize: 12.5, color: t.text2 }}>
         <strong style={{ color: t.gold }}>{METRIC_LABEL[metric]}</strong> by <strong style={{ color: t.text1 }}>{groupBy}</strong>
         {splitBy !== 'none' && <> split by <strong style={{ color: t.purple }}>{splitBy}</strong></>}
-        {' — '}<strong>{source === 'compare' ? 'NEW vs OLD' : source === 'new' ? 'NEW CRM' : 'OLD CRM'}</strong> · {from}→{to}
+        {' — '}<strong>NEW CRM</strong> · {from}→{to}
         {activeFilters.map(([k, v]) => <span key={k} style={{ marginLeft: 6, fontSize: 11, background: `${t.gold}1a`, border: `1px solid ${t.gold}55`, color: t.gold, borderRadius: 5, padding: '1px 7px' }}>{k}: {v}</span>)}
       </div>
 
@@ -161,14 +160,13 @@ export default function Productivity() {
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 2, borderBottom: `1px solid ${t.border}`, flexWrap: 'wrap' }}>
         <TabBtn id="overview" label="Overview" /><TabBtn id="trends" label="Trends" /><TabBtn id="distribution" label="Distribution / SLA" /><TabBtn id="people" label="People leaderboard" />
-        {source !== 'old' && <TabBtn id="stuck" label="Stuck / WIP" />}<TabBtn id="cases" label="Cases" />
+        <TabBtn id="stuck" label="Stuck / WIP" /><TabBtn id="cases" label="Cases" />
       </div>
 
       {loading ? <div style={{ ...card, padding: 80, display: 'flex', justifyContent: 'center' }}><GoldSpinner size={32} /></div> : !reports.length ? null : (
-        <div style={{ display: source === 'compare' ? 'grid' : 'block', gridTemplateColumns: source === 'compare' ? '1fr 1fr' : '1fr', gap: 14 }}>
+        <div style={{ display: 'block', gap: 14 }}>
           {reports.map(({ label, rep }) => (
             <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-              {source === 'compare' && <div style={{ fontWeight: 800, fontSize: 13, color: label.startsWith('NEW') ? t.green : t.blue }}>{label}</div>}
               {tab === 'overview' && <Overview rep={rep} metric={metric} t={t} card={card} th={th} td={td} />}
               {tab === 'trends' && <Trends rep={rep} bucket={bucket} t={t} card={card} />}
               {tab === 'distribution' && <Distribution rep={rep} sla={sla} setSla={setSla} t={t} card={card} th={th} td={td} inp={inp} />}

@@ -62,8 +62,6 @@ const PERM_TREE = [
           { key: 'livefeed.detail_table',      label: 'Detail Drill-down', desc: 'Expandable records table' },
           { key: 'livefeed.timeline',          label: 'Live Timeline',     desc: 'Real-time event feed' },
           { key: 'livefeed.date_picker',       label: 'Date Picker',       desc: 'View historical dates' },
-          { key: 'livefeed.old_crm_tab',       label: 'Old CRM Tab',       desc: 'Old CRM pipeline data' },
-          { key: 'livefeed.new_crm_tab',       label: 'New CRM Tab',       desc: 'New CRM pipeline data' },
           { key: 'livefeed.csv_export',        label: 'CSV Export',        desc: 'Download CSV from tables' },
         ],
       },
@@ -307,8 +305,6 @@ export const PERMISSION_REGISTRY = [
   {
     group: 'Live Feed Elements', icon: '📡', desc: 'Granular visibility inside the Live Feed',
     items: [
-      { key: 'livefeed.old_crm_tab',      label: 'Old CRM Tab',       desc: 'Old CRM data tab' },
-      { key: 'livefeed.new_crm_tab',      label: 'New CRM Tab',       desc: 'New CRM data tab' },
       { key: 'livefeed.date_picker',      label: 'Date Picker',       desc: 'View historical dates' },
       { key: 'livefeed.region_filter',    label: 'Region Filter',     desc: 'Filter by region' },
       { key: 'livefeed.summary_bar',      label: 'Summary Bar',       desc: 'Top strip with key numbers' },

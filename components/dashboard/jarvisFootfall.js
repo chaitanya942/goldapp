@@ -79,7 +79,7 @@ export function useJarvisFootfall(from, to) {
   return { ...state, reload: () => load(true) }
 }
 
-const walkinsOf = (r) => r.walkins_old + r.walkins_new + r.rewalkins
+const walkinsOf = (r) => r.walkins_new + r.rewalkins
 
 // Footfall is only compared with walk-ins on branch-days that have camera
 // data, so branches without a Jarvis camera never show up as "not punched".
@@ -94,7 +94,7 @@ export function summarizeFootfall(rows, { region = null, branch = null } = {}) {
     const w = walkinsOf(r)
     t.footfall += r.footfall
     t.walkins += w
-    t.fresh += r.walkins_old + r.walkins_new
+    t.fresh += r.walkins_new
     t.rewalkins += r.rewalkins
     if (r.male != null || r.female != null) {
       t.genderKnown = true
