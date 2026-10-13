@@ -245,7 +245,7 @@ function LiveOpsMap({ theme }) {
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0,1fr) 340px', gap: 10, height: isMobile ? 'auto' : 'calc(100vh - 290px)', minHeight: isMobile ? 0 : 520 }}>
           <div style={{ position: 'relative', borderRadius: 14, overflow: 'hidden', border: `1px solid ${t.border}`, height: isMobile ? '56vh' : '100%' }}>
             {isHO
-              ? <HoYard data={data} dark={dark} selected={selected} onSelect={onSelect} />
+              ? <HoYard data={data} dark={dark} selected={selected} onSelect={onSelect} t={t} />
               : <BranchMap data={data} region={region} dark={dark} colors={mapColors} selected={selected} onSelect={onSelect} onOpenHO={onOpenHO} />}
             {!isHO && (
               <div style={{ position: 'absolute', left: 10, bottom: 10, zIndex: 500, background: t.card + 'ee', border: `1px solid ${t.border}`, borderRadius: 10, padding: '7px 10px', fontSize: 11, color: t.text2, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
@@ -266,6 +266,12 @@ function LiveOpsMap({ theme }) {
         @keyframes simFlow { to { stroke-dashoffset: -32 } }
         .sim-route-flow { animation: simFlow 1.2s linear infinite }
         .sim-lane { animation: simFlow 1.6s linear infinite }
+        .sim-drive { animation: simRumble .35s ease-in-out infinite }
+        @keyframes simRumble { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-1.2px) } }
+        .sim-puff { transform-box: fill-box; transform-origin: center; animation: simPuff 1s ease-out infinite; opacity: 0 }
+        @keyframes simPuff { 0% { opacity: .55; transform: translate(0,0) scale(.4) } 100% { opacity: 0; transform: translate(-14px,-12px) scale(1.8) } }
+        .sim-pop { transform-box: fill-box; transform-origin: center bottom; animation: simPop .45s cubic-bezier(.34,1.56,.64,1) }
+        @keyframes simPop { from { transform: scale(.2); opacity: 0 } to { transform: scale(1); opacity: 1 } }
         .sim-truck { display: flex; align-items: center; gap: 3px; background: ${t.card}; border: 1.5px solid ${t.gold}; border-radius: 12px; padding: 1px 7px 1px 4px; box-shadow: 0 2px 8px rgba(0,0,0,.3); font-size: 13px; cursor: pointer; animation: simBob 1.4s ease-in-out infinite }
         .sim-truck b { font-size: 11px; color: ${t.text1} }
         .sim-truck.sel { border-color: ${t.blue}; box-shadow: 0 0 0 3px ${t.blue}55 }
