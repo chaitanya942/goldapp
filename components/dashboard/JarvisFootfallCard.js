@@ -101,7 +101,7 @@ export default function JarvisFootfallCard({ t, isMobile }) {
           <div style={{ fontSize: 14, fontWeight: 700, color: t.text1 }}>Store footfall vs CRM walk-ins</div>
           <div style={{ fontSize: 11.5, color: t.text3 }}>{dayLabel} · Jarvis{synced ? ` · synced ${synced}` : ''}</div>
         </div>
-        <FootfallCountToggle t={t} value={count} onChange={setCount} />
+        <FootfallCountToggle t={t} value={count} onChange={setCount} groupMissing={!!data && !(data.rows || []).some(r => r.group != null)} />
         <button onClick={openSection} style={{ padding: '6px 12px', borderRadius: 8, border: `1px solid ${t.border}`, background: t.card, color: t.text2, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
           Branch breakdown →
         </button>

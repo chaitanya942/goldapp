@@ -16,15 +16,17 @@ export const JARVIS_COUNTS = [
 ]
 export const JARVIS_COUNT_DEFAULT = 'group'
 
-export function FootfallCountToggle({ t, value, onChange }) {
+// groupMissing: Jarvis sent no group counts for the period, so Group shows
+// unique numbers — flag it on the button itself.
+export function FootfallCountToggle({ t, value, onChange, groupMissing = false }) {
   return (
     <div onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', border: `1px solid ${t.border}`, borderRadius: 8, overflow: 'hidden', flexShrink: 0 }}>
       {JARVIS_COUNTS.map(c => (
-        <button key={c.key} onClick={() => onChange(c.key)} style={{
+        <button key={c.key} onClick={() => onChange(c.key)} title={c.key === 'group' && groupMissing ? 'Jarvis isn’t sending group counts yet — showing unique footfall' : undefined} style={{
           padding: '5px 10px', border: 'none', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap',
           background: value === c.key ? `${t.blue}22` : 'transparent',
           color: value === c.key ? t.blue : t.text3, fontWeight: value === c.key ? 700 : 500,
-        }}>{c.label}</button>
+        }}>{c.label}{c.key === 'group' && groupMissing && <span style={{ marginLeft: 5, fontSize: 10, fontWeight: 700, color: t.orange || t.gold }}>· not available yet</span>}</button>
       ))}
     </div>
   )

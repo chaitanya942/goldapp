@@ -278,7 +278,7 @@ export default function JarvisFootfallSection({ t, isMobile }) {
             )}
           </div>
           <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', marginBottom: 14, alignItems: 'center' }}>
-            <FootfallCountToggle t={t} value={count} onChange={setCount} />
+            <FootfallCountToggle t={t} value={count} onChange={setCount} groupMissing={!!data && !rows.some(r => r.group != null)} />
             <span style={{ width: 1, height: 18, background: t.border, margin: '0 6px', flexShrink: 0 }} />
             <button onClick={() => { setRegion(null); setBranch(null) }} style={pill(!region)}>All regions</button>
             {s.regions.length > 0 && [...new Set(rows.map(r => r.region).filter(Boolean))].sort().map(r => (
