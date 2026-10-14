@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { supabase } from '../../lib/supabase';
+import { authedFetch } from '../../lib/authedFetch';
 import { useApp } from '../../lib/context';
 
 const FALLBACK = [
@@ -25,11 +25,11 @@ export default function LiveTicker() {
   useEffect(() => {
     let prev24 = null;
     const load = async () => {
-      const { data } = await supabase
-        .from('gold_rates').select('ambica_sell_rate, fetched_at')
-        .order('fetched_at', { ascending: false }).limit(1).single();
-      if (!data?.ambica_sell_rate) return;
-      const base = data.ambica_sell_rate;
+      // Via the API: gold_rates isn't browser-readable for non-admin roles.
+      const res = await authedFetch('/api/live-rate').catch(() => null);
+      const data = res?.ok ? await res.json().catch(() => null) : null;
+      if (!data?.rate24) return;
+      const base = data.rate24;
       const next = [
         { label: '24K', price: base,               prev: prev24 ?? base,                    unit: '/10g' },
         { label: '22K', price: calcKarat(base, 22), prev: prev24 ? calcKarat(prev24, 22) : calcKarat(base, 22), unit: '/10g' },

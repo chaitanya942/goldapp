@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp } from '../../lib/context'
 import { canSeeJarvis } from '../../lib/jarvisAccess'
+import { canSeeLiveRates } from '../../lib/liveRateAccess'
+import LiveTicker from '../ui/LiveTicker'
 import { authedFetch } from '../../lib/authedFetch'
 import { triggerSync } from '../../lib/triggerSync'
 import {
@@ -1168,6 +1170,9 @@ export default function DynamicDashboard() {
           </div>
         </div>
       </div>
+
+      {/* ── Live gold rates (24K / 22K / 18K) — same strip as the super-admin dashboard ── */}
+      {canSeeLiveRates(userProfile?.role, userProfile?.email) && <LiveTicker />}
 
       {/* ── Live Feed flashcards ──
           Anyone with access to Purchase Data → Live tab sees today's
