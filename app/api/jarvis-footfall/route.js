@@ -52,7 +52,7 @@ export async function GET(req) {
   const hit = cache.get(cacheKey)
   if (hit && Date.now() - hit.ts < CACHE_TTL_MS) return Response.json({ ...hit.data, cached: true })
 
-  const { data: branches, error: brErr } = await supabase.from('branches').select('name, region')
+  const { data: branches, error: brErr } = await supabase.from('branches').select('name, region, state')
   if (brErr) return Response.json({ error: brErr.message }, { status: 500 })
 
   let footfall = []
