@@ -90,6 +90,10 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
   const yConversionPct  = yFreshWalkins > 0 ? Math.round((yPurchasedCount / yFreshWalkins) * 100) : 0
   const yWeightConversionPct = yWalkinWt > 0 ? Math.round((yPurchasedWt / yWalkinWt) * 100) : 0
 
+  // Section title names the day, e.g. "Monday Walk-ins" (IST, re-read on every
+  // refresh so it rolls over at midnight).
+  const todayWeekday = () => new Date().toLocaleDateString('en-IN', { weekday: 'long', timeZone: 'Asia/Kolkata' })
+
   const minsAgo = lastUpdated ? Math.floor((Date.now() - lastUpdated.getTime()) / 60000) : null
   const liveLabel = !lastUpdated ? 'loading…' : minsAgo === 0 ? 'just now' : `${minsAgo}m ago`
 
@@ -103,7 +107,7 @@ export default function LiveFeedFlashcards({ t, isMobile, liveFeedAction }) {
         <div style={{ width: 28, height: 28, borderRadius: 8, background: `${t.green}18`, border: `1px solid ${t.green}30`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>
           <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: t.green, animation: 'lfPulse 1.6s infinite' }}/>
         </div>
-        <div style={{ fontSize: 11, fontWeight: 700, color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase' }}>Today's Feed</div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: t.text3, letterSpacing: '.1em', textTransform: 'uppercase' }}>{todayWeekday()} Walk-ins</div>
         <div style={{ flex: 1, height: 1, background: `linear-gradient(90deg,${t.green}30,transparent)` }}/>
         {liveFeedAction ? (
           <button onClick={liveFeedAction.onClick}
