@@ -84,10 +84,6 @@ export default function JarvisFootfallCard({ t, isMobile }) {
         <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 11.5, color: t.text3 }}>
           {s.genderKnown && <span>♂ {fmtN(s.male)} · ♀ {fmtN(s.female)}{s.unclassified > 0 ? ` · ${fmtN(s.unclassified)} unclassified` : ''}</span>}
           <span>{s.reporting}/{s.cameras} cameras reporting</span>
-          {s.offline.length > 0 && <span style={{ color: t.red }}>{s.offline.length} camera{s.offline.length > 1 ? 's' : ''} sent no data</span>}
-          {count === 'group' && s.groupFallback > 0 && <span style={{ color: t.orange || t.gold }}>{s.groupFallback === s.camDays ? 'Jarvis isn’t sending group counts yet — showing unique footfall' : `${s.groupFallback} camera${s.groupFallback > 1 ? 's' : ''} without a group count — unique used`}</span>}
-          {s.pendingStaff > 0 && <span style={{ color: t.orange || t.gold }}>Staff not yet removed at {s.pendingStaff} store{s.pendingStaff > 1 ? 's' : ''} — may be overcounted</span>}
-          {s.noCamera.length > 0 && <span>{fmtN(s.noCamera.reduce((a, b) => a + b.walkins, 0))} walk-ins at {s.noCamera.length} branches without a camera (not compared)</span>}
         </div>
       </>
     )

@@ -148,20 +148,6 @@ export default function JarvisFootfallSection({ t, isMobile }) {
             </Tile>
           </div>
 
-          {count === 'group' && s.groupFallback > 0 && (
-            <div style={{ marginTop: 10, fontSize: 12, color: t.text2, background: `${t.orange || t.gold}12`, border: `1px solid ${t.orange || t.gold}35`, borderRadius: 10, padding: '8px 12px' }}>
-              {s.groupFallback === s.camDays
-                ? 'Jarvis isn’t sending group counts for this period yet, so unique footfall is shown. Group counts fill in automatically once Jarvis provides them.'
-                : `${s.groupFallback} of ${s.camDays} store-days have no group count from Jarvis — their unique footfall is used.`}
-            </div>
-          )}
-
-          {s.pendingStaff > 0 && (
-            <div style={{ marginTop: 10, fontSize: 12, color: t.text2, background: `${t.orange || t.gold}12`, border: `1px solid ${t.orange || t.gold}35`, borderRadius: 10, padding: '8px 12px' }}>
-              Jarvis hasn&apos;t removed staff from {s.pendingStaff} store-day{s.pendingStaff > 1 ? 's' : ''} yet, so those footfall counts may be high. They update automatically once Jarvis finishes.
-            </div>
-          )}
-
           {s.days.length > 1 && <div style={{ marginTop: 12 }}><DailyChart t={t} days={s.days} /></div>}
 
           <div style={{ marginTop: 12, background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden' }}>
@@ -214,31 +200,6 @@ export default function JarvisFootfallSection({ t, isMobile }) {
             )}
           </div>
 
-          {[
-            { list: s.offline, color: t.red, title: `${s.offline.length} camera${s.offline.length > 1 ? 's' : ''} sent no data for this period (${fmtN(s.offline.reduce((a, b) => a + b.walkins, 0))} walk-ins, not compared)` },
-            { list: s.noCamera, color: t.text2, title: `${s.noCamera.length} branches have CRM walk-ins but no Jarvis camera (${fmtN(s.noCamera.reduce((a, b) => a + b.walkins, 0))} walk-ins, not compared)` },
-          ].filter(g => g.list.length > 0).map(g => (
-            <details key={g.title} style={{ marginTop: 10, background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: '10px 14px' }}>
-              <summary style={{ fontSize: 12, color: g.color, cursor: 'pointer', fontWeight: 600 }}>{g.title}</summary>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
-                {g.list.map(n => (
-                  <span key={n.branch} style={{ fontSize: 11.5, color: t.text2, background: t.card2, border: `1px solid ${t.border}`, borderRadius: 7, padding: '3px 8px' }}>{n.branch} · {n.walkins}</span>
-                ))}
-              </div>
-            </details>
-          ))}
-
-          <div style={{ marginTop: 10, fontSize: 11, color: t.text3, lineHeight: 1.6 }}>
-            {count === 'group'
-              ? 'Group footfall = Jarvis group count — people entering together count once (same basis as the Jarvis dashboard). '
-              : 'Unique footfall = every person the Jarvis camera counted entering, companions included. '}
-            Staff are removed once Jarvis&apos; staff-reduction run completes.
-            Walk-ins = CRM transactions opened that day + re-walk-ins (opened earlier, closed that day) — same basis as the Walked-in tile.
-            Only branch-days with camera data are compared.
-            {data?.crm && data.crm.new !== 'ok' && (
-              <span style={{ color: t.red }}> CRM unavailable — walk-ins may be understated.</span>
-            )}
-          </div>
         </>
       )
     }

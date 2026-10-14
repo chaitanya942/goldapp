@@ -64,9 +64,6 @@ export default function BusinessCalendarInsight({ t }) {
           </div>
         )}
 
-        <div style={{ fontSize: 10, color: t.text4, borderTop: `1px solid ${t.border}`, paddingTop: 8, marginTop: 2 }}>
-          Advisory based on South Indian Panchangam custom (auspicious-for-buying days tend to see lighter selling) — not a statistical forecast from this business's own data.
-        </div>
       </div>
     </div>
   )
