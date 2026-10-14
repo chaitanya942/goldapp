@@ -58,12 +58,6 @@ export default function BusinessCalendarInsight({ t }) {
           <div style={{ fontSize: 12, color: t.text3 }}>{meta.note}</div>
         )}
 
-        {!insight.dataAvailable && (
-          <div style={{ fontSize: 10.5, color: t.text4, fontStyle: 'italic' }}>
-            Panchangam calendar for {today.slice(0, 4)} isn't curated yet — only the weekly Tuesday/Friday pattern is reflected above. Update lib/businessCalendarInsight.js with that year's festival/Amavasya dates.
-          </div>
-        )}
-
       </div>
     </div>
   )

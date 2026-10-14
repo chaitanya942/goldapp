@@ -22,7 +22,7 @@ export function FootfallCountToggle({ t, value, onChange, groupMissing = false }
   return (
     <div onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', border: `1px solid ${t.border}`, borderRadius: 8, overflow: 'hidden', flexShrink: 0 }}>
       {JARVIS_COUNTS.map(c => (
-        <button key={c.key} onClick={() => onChange(c.key)} title={c.key === 'group' && groupMissing ? 'Jarvis isn’t sending group counts yet — showing unique footfall' : undefined} style={{
+        <button key={c.key} onClick={() => onChange(c.key)} style={{
           padding: '5px 10px', border: 'none', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap',
           background: value === c.key ? `${t.blue}22` : 'transparent',
           color: value === c.key ? t.blue : t.text3, fontWeight: value === c.key ? 700 : 500,
