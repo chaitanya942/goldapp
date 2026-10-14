@@ -59,7 +59,7 @@ export async function GET(req) {
   let tableMissing = false
   try {
     footfall = await selectAllRows(() => supabase.from('jarvis_footfall')
-      .select('store_code, store_name, footfall_date, entry_count, male_count, female_count, age_data, data_status, staff_reduction_status')
+      .select('*') // '*' so a missing group_count column (migration not run yet) doesn't break reads
       .gte('footfall_date', from).lte('footfall_date', to)
       .order('footfall_date').order('store_code'))
   } catch (err) {

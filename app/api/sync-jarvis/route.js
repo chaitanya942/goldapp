@@ -78,6 +78,7 @@ export async function POST(req) {
         store_name: s.name,
         footfall_date: d,
         entry_count: Number(x.entry_count) || 0,
+        group_count: x.group_count == null ? null : Number(x.group_count) || 0,
         male_count: x.male_count ?? null,
         female_count: x.female_count ?? null,
         age_data: x.age_data && typeof x.age_data === 'object' ? x.age_data : null,
@@ -91,8 +92,18 @@ export async function POST(req) {
     }
   })
 
+  // group_count needs sql/jarvis_footfall_group_count.sql; until that's run,
+  // keep syncing everything else rather than failing the whole batch.
+  let groupColumn = true
   for (let i = 0; i < rows.length; i += 500) {
-    const { error } = await supabase.from('jarvis_footfall').upsert(rows.slice(i, i + 500), { onConflict: 'store_code,footfall_date' })
+    let batch = rows.slice(i, i + 500)
+    if (!groupColumn) batch = batch.map(({ group_count, ...r }) => r)
+    let { error } = await supabase.from('jarvis_footfall').upsert(batch, { onConflict: 'store_code,footfall_date' })
+    if (error && groupColumn && /group_count/.test(error.message || '')) {
+      groupColumn = false
+      batch = batch.map(({ group_count, ...r }) => r)
+      ;({ error } = await supabase.from('jarvis_footfall').upsert(batch, { onConflict: 'store_code,footfall_date' }))
+    }
     if (error) {
       const msg = isMissingTable(error) ? 'jarvis_footfall table missing — run sql/jarvis_footfall.sql in Supabase' : error.message
       return Response.json({ success: false, error: msg }, { status: 500 })
@@ -104,6 +115,8 @@ export async function POST(req) {
     dates: [...dates].sort(),
     stores: sess.stores.length,
     upserted: rows.length,
+    group_counts: rows.filter(r => r.group_count != null).length,
+    ...(groupColumn ? {} : { warning: 'group_count column missing — run sql/jarvis_footfall_group_count.sql' }),
     failed: failures.length,
     failures: failures.slice(0, 10),
   })

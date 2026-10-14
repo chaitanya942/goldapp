@@ -6,7 +6,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   useJarvisFootfall, jarvisRange, jarvisYesterday, summarizeFootfall, JARVIS_PERIODS,
-  punchColor, fmtN, fmtPctR, fmtTime,
+  punchColor, fmtN, fmtPctR, fmtTime, FootfallCountToggle, JARVIS_COUNT_DEFAULT,
 } from './jarvisFootfall'
 import { JARVIS_SECTION_ID, JARVIS_OPEN_EVENT } from './JarvisFootfallCard'
 
@@ -87,6 +87,7 @@ export default function JarvisFootfallSection({ t, isMobile }) {
   const [region, setRegion] = useState(null)
   const [branch, setBranch] = useState(null)
   const [sort, setSort] = useState('gap')
+  const [count, setCount] = useState(JARVIS_COUNT_DEFAULT)
   const [showAll, setShowAll] = useState(false)
 
   useEffect(() => {
@@ -100,7 +101,7 @@ export default function JarvisFootfallSection({ t, isMobile }) {
   const yday = jarvisYesterday()
   const { data, loading, error, reload } = useJarvisFootfall(open ? from : null, open ? to : null)
   const rows = from ? (data?.rows || []) : []
-  const s = useMemo(() => summarizeFootfall(rows, { region, branch }), [rows, region, branch])
+  const s = useMemo(() => summarizeFootfall(rows, { region, branch, count }), [rows, region, branch, count])
   const branchOptions = useMemo(() => [...new Set(rows.filter(r => r.footfall != null && (!region || r.region === region)).map(r => r.branch))].sort(), [rows, region])
   const sortedBranches = useMemo(() => [...s.branches].sort(SORTS[sort]), [s.branches, sort])
   const visibleBranches = showAll ? sortedBranches : sortedBranches.slice(0, 15)
@@ -132,7 +133,7 @@ export default function JarvisFootfallSection({ t, isMobile }) {
       body = (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)', gap: 10 }}>
-            <Tile t={t} label="Store footfall" value={fmtN(s.footfall)} color={t.blue} sub={`${s.reporting}/${s.cameras} cameras reporting`} />
+            <Tile t={t} label={count === 'group' ? 'Group footfall' : 'Unique footfall'} value={fmtN(s.footfall)} color={t.blue} sub={`${s.reporting}/${s.cameras} cameras reporting`} />
             <Tile t={t} label="CRM walk-ins" value={fmtN(s.walkins)} color={t.gold} sub={`${fmtN(s.fresh)} fresh · ${fmtN(s.rewalkins)} re-walk-in`} />
             <Tile t={t} label="Punch rate" value={fmtPctR(s.punch)} color={punchColor(t, s.punch)} sub="walk-ins ÷ footfall" />
             <Tile t={t} label="Not punched" value={fmtN(Math.max(0, s.gap))} color={s.gap > 0 ? (t.orange || t.gold) : t.green} sub="footfall − walk-ins" />
@@ -146,6 +147,14 @@ export default function JarvisFootfallSection({ t, isMobile }) {
                 : <div style={{ fontSize: 12, color: t.text3, marginTop: 6 }}>Not reported</div>}
             </Tile>
           </div>
+
+          {count === 'group' && s.groupFallback > 0 && (
+            <div style={{ marginTop: 10, fontSize: 12, color: t.text2, background: `${t.orange || t.gold}12`, border: `1px solid ${t.orange || t.gold}35`, borderRadius: 10, padding: '8px 12px' }}>
+              {s.groupFallback === s.camDays
+                ? 'Jarvis isn’t sending group counts for this period yet, so unique footfall is shown. Group counts fill in automatically once Jarvis provides them.'
+                : `${s.groupFallback} of ${s.camDays} store-days have no group count from Jarvis — their unique footfall is used.`}
+            </div>
+          )}
 
           {s.pendingStaff > 0 && (
             <div style={{ marginTop: 10, fontSize: 12, color: t.text2, background: `${t.orange || t.gold}12`, border: `1px solid ${t.orange || t.gold}35`, borderRadius: 10, padding: '8px 12px' }}>
@@ -166,7 +175,7 @@ export default function JarvisFootfallSection({ t, isMobile }) {
                   <tr>
                     {th('branch', 'Branch', 'left')}
                     {!isMobile && th(null, 'Region', 'left')}
-                    {th('footfall', 'Footfall')}
+                    {th('footfall', count === 'group' ? 'Group footfall' : 'Unique footfall')}
                     {th('walkins', 'Walk-ins')}
                     {th('punch', 'Punch %')}
                     {th('gap', 'Not punched')}
@@ -220,7 +229,10 @@ export default function JarvisFootfallSection({ t, isMobile }) {
           ))}
 
           <div style={{ marginTop: 10, fontSize: 11, color: t.text3, lineHeight: 1.6 }}>
-            Footfall = people counted entering by the Jarvis store camera (includes companions; staff removed once Jarvis&apos; staff-reduction run completes).
+            {count === 'group'
+              ? 'Group footfall = Jarvis group count — people entering together count once (same basis as the Jarvis dashboard). '
+              : 'Unique footfall = every person the Jarvis camera counted entering, companions included. '}
+            Staff are removed once Jarvis&apos; staff-reduction run completes.
             Walk-ins = CRM transactions opened that day + re-walk-ins (opened earlier, closed that day) — same basis as the Walked-in tile.
             Only branch-days with camera data are compared.
             {data?.crm && data.crm.new !== 'ok' && (
@@ -266,6 +278,8 @@ export default function JarvisFootfallSection({ t, isMobile }) {
             )}
           </div>
           <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', marginBottom: 14, alignItems: 'center' }}>
+            <FootfallCountToggle t={t} value={count} onChange={setCount} />
+            <span style={{ width: 1, height: 18, background: t.border, margin: '0 6px', flexShrink: 0 }} />
             <button onClick={() => { setRegion(null); setBranch(null) }} style={pill(!region)}>All regions</button>
             {s.regions.length > 0 && [...new Set(rows.map(r => r.region).filter(Boolean))].sort().map(r => (
               <button key={r} onClick={() => { setRegion(r); setBranch(null) }} style={pill(region === r)}>{r}</button>

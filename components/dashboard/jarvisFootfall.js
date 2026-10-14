@@ -8,6 +8,28 @@ import { istLastWeekRange } from '../../lib/dateIst'
 
 export const JARVIS_REFRESH_MS = 5 * 60 * 1000
 
+// Footfall basis. 'group' = Jarvis group_count (people entering together count
+// once — matches Jarvis' own dashboard); 'unique' = entry_count (every person).
+export const JARVIS_COUNTS = [
+  { key: 'group', label: 'Group footfall' },
+  { key: 'unique', label: 'Unique footfall' },
+]
+export const JARVIS_COUNT_DEFAULT = 'group'
+
+export function FootfallCountToggle({ t, value, onChange }) {
+  return (
+    <div onClick={e => e.stopPropagation()} style={{ display: 'inline-flex', border: `1px solid ${t.border}`, borderRadius: 8, overflow: 'hidden', flexShrink: 0 }}>
+      {JARVIS_COUNTS.map(c => (
+        <button key={c.key} onClick={() => onChange(c.key)} style={{
+          padding: '5px 10px', border: 'none', fontSize: 11.5, cursor: 'pointer', whiteSpace: 'nowrap',
+          background: value === c.key ? `${t.blue}22` : 'transparent',
+          color: value === c.key ? t.blue : t.text3, fontWeight: value === c.key ? 700 : 500,
+        }}>{c.label}</button>
+      ))}
+    </div>
+  )
+}
+
 const istToday = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10)
 const addDays = (d, n) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10) }
 
@@ -83,8 +105,19 @@ const walkinsOf = (r) => r.walkins_new + r.rewalkins
 
 // Footfall is only compared with walk-ins on branch-days that have camera
 // data, so branches without a Jarvis camera never show up as "not punched".
-export function summarizeFootfall(rows, { region = null, branch = null } = {}) {
-  const sel = (rows || []).filter(r => (!region || r.region === region) && (!branch || r.branch === branch))
+// count = 'group' | 'unique'. In group mode a camera-day with no group_count
+// (Jarvis didn't report it) falls back to its unique count and is tallied in
+// groupFallback so the UI can say so.
+export function summarizeFootfall(rows, { region = null, branch = null, count = 'unique' } = {}) {
+  let groupFallback = 0
+  const sel = (rows || [])
+    .filter(r => (!region || r.region === region) && (!branch || r.branch === branch))
+    .map(r => {
+      if (r.footfall == null) return { ...r, unique: null }
+      if (count !== 'group') return { ...r, unique: r.footfall }
+      if (r.group == null) groupFallback++
+      return { ...r, unique: r.footfall, footfall: r.group ?? r.footfall }
+    })
   const cam = sel.filter(r => r.footfall != null)
 
   const t = { footfall: 0, walkins: 0, fresh: 0, rewalkins: 0, male: 0, female: 0, unclassified: 0, genderKnown: false, pendingStaff: 0 }
@@ -100,7 +133,7 @@ export function summarizeFootfall(rows, { region = null, branch = null } = {}) {
       t.genderKnown = true
       t.male += r.male || 0
       t.female += r.female || 0
-      t.unclassified += Math.max(0, r.footfall - (r.male || 0) - (r.female || 0))
+      t.unclassified += Math.max(0, r.unique - (r.male || 0) - (r.female || 0))
     }
     const pending = !!r.staff_status && r.staff_status !== 'SUCCESS'
     if (pending) t.pendingStaff++
@@ -141,6 +174,9 @@ export function summarizeFootfall(rows, { region = null, branch = null } = {}) {
 
   return {
     ...t,
+    count,
+    groupFallback,
+    camDays: cam.length,
     punch: t.footfall > 0 ? t.walkins / t.footfall : null,
     gap: t.footfall - t.walkins,
     cameras: camBranches.size,
