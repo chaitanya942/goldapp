@@ -12,6 +12,7 @@
 // hand it in.
 
 import { useEffect, useState } from 'react'
+import { useMobile } from '../../lib/consignmentTheme'
 import { authedFetch } from '../../lib/authedFetch'
 import { istToday, istDaysAgo, istLastWeekRange } from '../../lib/dateIst'
 import { useDashboardAuditLog } from '../../lib/useDashboardAuditLog'
@@ -351,6 +352,9 @@ function FilterPill({ active, color, onClick, t, children }) {
 
 function ConsSection({ t, title, subtitle, accent, regions, getTotals, getBranches, expanded, onToggle, onSegmentClick, cta }) {
   const [sortKey, setSortKey] = useState('weight')
+  // Phones: the 8 fixed columns (~426px) don't fit, so each region row becomes
+  // two lines — name / age / share / chevron, then br · bills · net wt.
+  const isMobile = useMobile()
 
   const sectionTotals = regions.reduce((acc, r) => {
     const tot = getTotals(r)
@@ -412,7 +416,7 @@ function ConsSection({ t, title, subtitle, accent, regions, getTotals, getBranch
         padding: '14px 18px',
         borderBottom: `1px solid ${t.border}`,
         background: `linear-gradient(90deg, ${accent}1a 0%, ${accent}06 35%, transparent 70%)`,
-        display: 'flex', alignItems: 'center', gap: 10,
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', rowGap: 4,
       }}>
         <div style={{ width: 3, height: 22, borderRadius: 2, background: `linear-gradient(180deg, ${accent} 0%, ${accent}40 100%)`, boxShadow: `0 0 10px ${accent}60` }} />
         <span style={{ fontSize: 12.5, color: accent, letterSpacing: '.16em', fontWeight: 700, textTransform: 'uppercase' }}>{title}</span>
@@ -507,6 +511,19 @@ function ConsSection({ t, title, subtitle, accent, regions, getTotals, getBranch
           const branches = getBranches(r)
           const color = REGION_COLORS_DASH[r] || t.text3
           const open = expanded.has(r)
+          const metricCells = [
+            <span key="br" style={{ fontFamily: 'monospace', textAlign: 'right', whiteSpace: 'nowrap' }}>
+              <strong style={{ color: t.text1, fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{tot.branchCount}</strong>
+              <span style={{ color: t.text4, fontSize: 10, marginLeft: 3 }}>br</span>
+            </span>,
+            <span key="bills" style={{ fontFamily: 'monospace', textAlign: 'right', whiteSpace: 'nowrap' }}>
+              <strong style={{ color: t.text1, fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{tot.bills}</strong>
+              <span style={{ color: t.text4, fontSize: 10, marginLeft: 3 }}>bills</span>
+            </span>,
+            <span key="wt" style={{ textAlign: 'right', color: t.gold, fontFamily: 'monospace', fontSize: 13.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+              {fmtWt(tot.netWt)}
+            </span>,
+          ]
           return (
             <div key={r}
               style={{
@@ -520,15 +537,15 @@ function ConsSection({ t, title, subtitle, accent, regions, getTotals, getBranch
                   width: '100%', textAlign: 'left',
                   background: open ? `linear-gradient(90deg, ${color}18 0%, ${color}06 50%, transparent 100%)` : 'transparent',
                   border: 'none', cursor: 'pointer',
-                  padding: '15px 16px 13px 20px',
+                  padding: isMobile ? '12px 12px 11px 16px' : '15px 16px 13px 20px',
                   // CSS grid with FIXED column widths — every cell (br, bills,
                   // net wt, age badge, % pill) has a deterministic width so
                   // digits line up vertically across rows. The age-badge
                   // column is reserved even when the badge is absent so the
                   // % pill never shifts position.
                   display: 'grid',
-                  gridTemplateColumns: '10px 1fr 58px 76px 84px 40px 52px 14px',
-                  columnGap: 8,
+                  gridTemplateColumns: isMobile ? '10px minmax(0, 1fr) auto auto 14px' : '10px 1fr 58px 76px 84px 40px 52px 14px',
+                  columnGap: 8, rowGap: isMobile ? 6 : 0,
                   alignItems: 'center',
                   transition: 'background .18s, transform .12s',
                   ['--region-color']: color,
@@ -546,20 +563,8 @@ function ConsSection({ t, title, subtitle, accent, regions, getTotals, getBranch
                 }} />
                 {/* col 2: region name (ellipsis) */}
                 <span style={{ fontSize: 13.5, color: t.text1, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.005em', minWidth: 0 }}>{r}</span>
-                {/* col 3: br count */}
-                <span style={{ fontFamily: 'monospace', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                  <strong style={{ color: t.text1, fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{tot.branchCount}</strong>
-                  <span style={{ color: t.text4, fontSize: 10, marginLeft: 3 }}>br</span>
-                </span>
-                {/* col 4: bills count */}
-                <span style={{ fontFamily: 'monospace', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                  <strong style={{ color: t.text1, fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{tot.bills}</strong>
-                  <span style={{ color: t.text4, fontSize: 10, marginLeft: 3 }}>bills</span>
-                </span>
-                {/* col 5: net wt (right-aligned) */}
-                <span style={{ textAlign: 'right', color: t.gold, fontFamily: 'monospace', fontSize: 13.5, fontWeight: 700, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                  {fmtWt(tot.netWt)}
-                </span>
+                {/* cols 3–5: br · bills · net wt (own line on phones, below) */}
+                {!isMobile && metricCells}
                 {/* col 6: age badge (slot is always reserved, content optional) */}
                 <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   {tot.maxOldestDays > 7 && (
@@ -577,6 +582,9 @@ function ConsSection({ t, title, subtitle, accent, regions, getTotals, getBranch
                 </span>
                 {/* col 8: chevron */}
                 <span style={{ fontSize: 10, color: t.text4, transform: open ? 'rotate(0)' : 'rotate(-90deg)', transition: 'transform .25s', textAlign: 'center' }}>▾</span>
+                {isMobile && (
+                  <span style={{ gridColumn: '2 / -1', display: 'flex', gap: 14, alignItems: 'baseline' }}>{metricCells}</span>
+                )}
                 <span style={{
                   position: 'absolute', bottom: 0, left: 3,
                   height: 3, width: `${share * 100}%`,

@@ -349,6 +349,8 @@ function ConsignmentBalanceView({ t, stats, isMobile, setActiveNav }) {
 }
 
 function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBranches, getBranchView, expanded, onToggle, countLabel, onSegmentClick, cta }) {
+  // Phones: the region row wraps — br · bills · net wt drop to a second line.
+  const isMobile = useMobile()
   // Per-section sort. 'weight' = net wt desc (default). Others sort accordingly.
   const [sortKey, setSortKey] = useState('weight')
 
@@ -418,7 +420,7 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
         padding: '14px 18px',
         borderBottom: `1px solid ${t.border}`,
         background: `linear-gradient(90deg, ${accent}1a 0%, ${accent}06 35%, transparent 70%)`,
-        display: 'flex', alignItems: 'center', gap: 10,
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', rowGap: 4,
       }}>
         <div style={{ width: 3, height: 22, borderRadius: 2, background: `linear-gradient(180deg, ${accent} 0%, ${accent}40 100%)`, boxShadow: `0 0 10px ${accent}60` }} />
         <span style={{ fontSize: 12.5, color: accent, letterSpacing: '.16em', fontWeight: 700, textTransform: 'uppercase' }}>{title}</span>
@@ -537,8 +539,9 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
                   width: '100%', textAlign: 'left',
                   background: open ? `linear-gradient(90deg, ${color}18 0%, ${color}06 50%, transparent 100%)` : 'transparent',
                   border: 'none', cursor: 'pointer',
-                  padding: '15px 16px 13px 20px',
+                  padding: isMobile ? '12px 12px 11px 16px' : '15px 16px 13px 20px',
                   display: 'flex', alignItems: 'center', gap: 10,
+                  flexWrap: isMobile ? 'wrap' : 'nowrap', rowGap: 6,
                   transition: 'background .18s, transform .12s',
                   ['--region-color']: color,
                 }}>
@@ -553,13 +556,13 @@ function DashConsSection({ t, title, subtitle, accent, regions, getTotals, getBr
                   background: color, flexShrink: 0,
                   boxShadow: `0 0 0 3px ${color}25, 0 0 8px ${color}50`,
                 }} />
-                <span style={{ fontSize: 13.5, color: t.text1, fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.005em' }}>{r}</span>
+                <span style={{ fontSize: 13.5, color: t.text1, fontWeight: 600, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-.005em' }}>{r}</span>
                 {/* Per-region metrics. Sized + weighted so they read clearly
                     at a glance — no need to lean in. Today's-weight badge
                     has been removed from this row (it's still surfaced at
                     the section level). Each value gets its own micro-block
                     so the numbers stand out from their labels. */}
-                <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 14, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 14, fontFamily: 'monospace', whiteSpace: 'nowrap', ...(isMobile ? { order: 10, flexBasis: '100%', paddingLeft: 20 } : {}) }}>
                   <span>
                     <strong style={{ color: t.text1, fontSize: 13, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{rowCount}</strong>
                     <span style={{ color: t.text4, fontSize: 10, marginLeft: 3 }}>{countLabel}</span>
