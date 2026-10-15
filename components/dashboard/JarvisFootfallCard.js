@@ -93,7 +93,7 @@ export default function JarvisFootfallCard({ t, isMobile }) {
     <div style={{ background: `linear-gradient(145deg,${t.card},${t.card2})`, border: `1px solid ${t.border}`, borderRadius: 16, padding: isMobile ? '14px 14px' : '18px 20px', boxShadow: t.shadow }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
         <div style={{ width: 32, height: 32, borderRadius: 9, background: `${t.blue}22`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>👥</div>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: '1 1 220px', minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: t.text1 }}>Store footfall vs CRM walk-ins</div>
           <div style={{ fontSize: 11.5, color: t.text3 }}>{dayLabel} · Jarvis{synced ? ` · synced ${synced}` : ''}</div>
         </div>

@@ -165,6 +165,12 @@ svg.recharts-surface { pointer-events: none !important; }
     border-top: 1px solid rgba(128,128,128,.1);
   }
 
+  /* Grid cells may shrink below their content. A `1fr` track's minimum is the
+     cell's min-content width, so one no-wrap value ("Previous period: ₹5.76 Cr")
+     pushed 2-column KPI grids past the screen edge, cutting off the right
+     column. Applies to every inline-styled grid in the app. */
+  [style*="grid-template-columns"] > * { min-width: 0; }
+
   /* ── Hub content & tab bar ── */
   .hub-content {
     padding: 14px !important;
