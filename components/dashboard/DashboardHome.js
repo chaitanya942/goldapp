@@ -1410,6 +1410,7 @@ export default function DashboardHome() {
         .overview-body {
           display: grid;
           grid-template-rows: 1fr;
+          grid-template-columns: minmax(0, 1fr);
           transition: grid-template-rows .35s cubic-bezier(.4,0,.2,1), opacity .3s ease;
           overflow: hidden;
         }
@@ -1417,7 +1418,7 @@ export default function DashboardHome() {
           grid-template-rows: 0fr;
           opacity: 0;
         }
-        .overview-body > div { min-height: 0; }
+        .overview-body > div { min-height: 0; min-width: 0; }
       `}</style>
 
       {/* ── HERO ── */}

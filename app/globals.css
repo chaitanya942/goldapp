@@ -171,6 +171,10 @@ svg.recharts-surface { pointer-events: none !important; }
      column. Applies to every inline-styled grid in the app. */
   [style*="grid-template-columns"] > * { min-width: 0; }
 
+  /* Live gold-rate strip: three columns must fit a 390–440pt iPhone. */
+  .lt-cell { padding: 12px 10px !important; }
+  .lt-price { font-size: 1rem !important; }
+
   /* ── Hub content & tab bar ── */
   .hub-content {
     padding: 14px !important;

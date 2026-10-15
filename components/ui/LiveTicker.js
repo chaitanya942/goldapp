@@ -65,21 +65,20 @@ export default function LiveTicker() {
         const flashBg = flash[r.label] === 'up'   ? 'rgba(58,170,106,0.12)' :
                         flash[r.label] === 'down' ? 'rgba(224,85,85,0.12)'   : t.bg;
         return (
-          <div key={r.label} style={{
-            padding: '14px 20px',
+          <div key={r.label} className="lt-cell" style={{
+            padding: '14px 20px', minWidth: 0,
             background: flashBg,
             borderRight: i < 2 ? `1px solid ${t.sep}` : 'none',
             transition: 'background 0.3s ease',
           }}>
             <div style={{ fontSize: '.55rem', letterSpacing: '.18em', textTransform: 'uppercase', color: t.label, marginBottom: '6px', fontWeight: 600 }}>
-              {r.label} GOLD
+              {r.label} GOLD <span style={{ color: t.dim, letterSpacing: '.04em', textTransform: 'none' }}>{r.unit}</span>
             </div>
-            <div style={{ fontSize: '1.1rem', fontWeight: 700, letterSpacing: '-.02em', lineHeight: 1,
+            <div className="lt-price" style={{ fontSize: '1.1rem', fontWeight: 700, whiteSpace: 'nowrap', letterSpacing: '-.02em', lineHeight: 1,
               color: flash[r.label] === 'up' ? '#3aaa6a' : flash[r.label] === 'down' ? '#e05555' : t.price,
               transition: 'color 0.3s ease', fontVariantNumeric: 'tabular-nums',
             }}>
               ₹{r.price.toLocaleString('en-IN')}
-              <span style={{ fontSize: '.6rem', color: t.dim, marginLeft: '4px', fontWeight: 400 }}>{r.unit}</span>
             </div>
             <div style={{ fontSize: '.6rem', marginTop: '4px', color: up ? '#3aaa6a' : down ? '#e05555' : t.dim, display: 'flex', alignItems: 'center', gap: '3px' }}>
               <span>{up ? '▲' : down ? '▼' : '—'}</span>

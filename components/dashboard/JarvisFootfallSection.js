@@ -207,16 +207,18 @@ export default function JarvisFootfallSection({ t, isMobile }) {
 
   return (
     <div id={JARVIS_SECTION_ID} style={{ marginTop: 14, border: `1px solid ${t.border2 || t.border}`, borderRadius: 20, background: `linear-gradient(160deg,${t.card2},${t.card3 || t.card2})`, boxShadow: t.shadow, overflow: 'hidden', scrollMarginTop: 80 }}>
-      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: open ? (isMobile ? '14px 16px' : '18px 24px') : (isMobile ? '10px 16px' : '12px 24px'), cursor: 'pointer', userSelect: 'none', borderBottom: open ? `1px solid ${t.border}` : 'none', flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 3, height: 20, borderRadius: 2, background: `linear-gradient(180deg,${t.blue},${t.blue}40)`, boxShadow: `0 0 8px ${t.blue}60` }} />
-          <div style={{ fontSize: 14, color: t.text2, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Jarvis · Store Footfall</div>
+      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: open ? (isMobile ? '14px 16px' : '18px 24px') : (isMobile ? '10px 16px' : '12px 24px'), cursor: 'pointer', userSelect: 'none', borderBottom: open ? `1px solid ${t.border}` : 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+          <div style={{ width: 3, height: 20, borderRadius: 2, flexShrink: 0, background: `linear-gradient(180deg,${t.blue},${t.blue}40)`, boxShadow: `0 0 8px ${t.blue}60` }} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: isMobile ? 12.5 : 14, color: t.text2, letterSpacing: isMobile ? '.08em' : '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Jarvis · Store Footfall</div>
+            {open && synced && <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>synced {synced}</div>}
+          </div>
         </div>
-        {open && synced && <div style={{ fontSize: 11, color: t.text3 }}>synced {synced}</div>}
         {open && (
-          <button onClick={e => { e.stopPropagation(); reload() }} style={{ padding: '4px 10px', borderRadius: 7, border: `1px solid ${t.border}`, background: t.card, color: t.text3, fontSize: 12, cursor: 'pointer' }}>↻</button>
+          <button onClick={e => { e.stopPropagation(); reload() }} style={{ padding: '4px 10px', borderRadius: 7, border: `1px solid ${t.border}`, background: t.card, color: t.text3, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>↻</button>
         )}
-        <div style={{ marginLeft: 'auto', width: 28, height: 28, borderRadius: 8, background: `${t.blue}12`, border: `1px solid ${t.blue}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.blue, fontSize: 11, transition: 'transform .35s', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}>▼</div>
+        <div style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, background: `${t.blue}12`, border: `1px solid ${t.blue}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.blue, fontSize: 11, transition: 'transform .35s', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}>▼</div>
       </div>
 
       {open && (
@@ -238,9 +240,10 @@ export default function JarvisFootfallSection({ t, isMobile }) {
               <span style={{ fontSize: 11.5, color: t.text3, alignSelf: 'center', marginLeft: 6, whiteSpace: 'nowrap' }}>{from ? `${from === to ? from : `${from} → ${to}`}${range.hint ? ` · ${range.hint}` : ''}` : range.note}</span>
             )}
           </div>
-          <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', marginBottom: 14, alignItems: 'center' }}>
+          <div style={{ marginBottom: 8 }}>
             <FootfallCountToggle t={t} value={count} onChange={setCount} groupMissing={!!data && !rows.some(r => r.group != null)} />
-            <span style={{ width: 1, height: 18, background: t.border, margin: '0 6px', flexShrink: 0 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', marginBottom: 14, alignItems: 'center' }}>
             <button onClick={() => { setRegion(null); setBranch(null) }} style={pill(!region)}>All regions</button>
             {s.regions.length > 0 && [...new Set(rows.map(r => r.region).filter(Boolean))].sort().map(r => (
               <button key={r} onClick={() => { setRegion(r); setBranch(null) }} style={pill(region === r)}>{r}</button>
