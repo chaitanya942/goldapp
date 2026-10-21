@@ -157,10 +157,16 @@ export function summarizeFootfall(rows, { region = null, branch = null, count = 
   // camera sent no data (NO_DATA) for every day in the range.
   const noCamera = new Map()
   const camBranches = new Set(cam.map(r => r.branch))
-  let allWalkins = 0
+  // All walk-ins in the selection (every branch) — the same total as the
+  // dashboard's Walked In tile. Punch rate / not punched still use only
+  // camera branch-days (t.walkins), or branches without a camera would look
+  // like missed punches.
+  let allWalkins = 0, allFresh = 0, allRewalkins = 0
   for (const r of sel) {
     const w = walkinsOf(r)
     allWalkins += w
+    allFresh += r.walkins_new
+    allRewalkins += r.rewalkins
     if (camBranches.has(r.branch)) continue
     const n = noCamera.get(r.branch) || { branch: r.branch, walkins: 0, offline: false }
     n.walkins += w
@@ -183,7 +189,7 @@ export function summarizeFootfall(rows, { region = null, branch = null, count = 
     gap: t.footfall - t.walkins,
     cameras: camBranches.size,
     reporting: branches.filter(b => b.footfall > 0).length,
-    allWalkins,
+    allWalkins, allFresh, allRewalkins,
     branches,
     days: [...byDay.values()].sort((a, b) => (a.date < b.date ? -1 : 1)),
     noCamera: [...noCamera.values()].filter(n => n.walkins > 0 && !n.offline).sort((a, b) => b.walkins - a.walkins),

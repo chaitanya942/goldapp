@@ -134,8 +134,8 @@ export default function JarvisFootfallSection({ t, isMobile }) {
         <>
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)', gap: 10 }}>
             <Tile t={t} label={count === 'group' ? 'Group footfall' : 'Unique footfall'} value={fmtN(s.footfall)} color={t.blue} sub={`${s.reporting}/${s.cameras} cameras reporting`} />
-            <Tile t={t} label="CRM walk-ins" value={fmtN(s.walkins)} color={t.gold} sub={`${fmtN(s.fresh)} fresh · ${fmtN(s.rewalkins)} re-walk-in`} />
-            <Tile t={t} label="Punch rate" value={fmtPctR(s.punch)} color={punchColor(t, s.punch)} sub="walk-ins ÷ footfall" />
+            <Tile t={t} label="CRM walk-ins" value={fmtN(s.allWalkins)} color={t.gold} sub={`${fmtN(s.allFresh)} fresh · ${fmtN(s.allRewalkins)} re-walk-in · ${fmtN(s.walkins)} at camera branches`} />
+            <Tile t={t} label="Punch rate" value={fmtPctR(s.punch)} color={punchColor(t, s.punch)} sub="camera-branch walk-ins ÷ footfall" />
             <Tile t={t} label="Not punched" value={fmtN(Math.max(0, s.gap))} color={s.gap > 0 ? (t.orange || t.gold) : t.green} sub="footfall − walk-ins" />
             <Tile t={t} label="Gender">
               {s.genderKnown

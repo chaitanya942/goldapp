@@ -66,8 +66,8 @@ export default function JarvisFootfallCard({ t, isMobile }) {
       <>
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: isMobile ? 14 : 18 }}>
           <Metric t={t} label="Store footfall" value={fmtN(s.footfall)} color={t.blue} sub={count === 'group' ? 'Group footfall' : 'Unique footfall'} />
-          <Metric t={t} label="CRM walk-ins" value={fmtN(s.walkins)} color={t.gold} sub={s.rewalkins ? `${fmtN(s.fresh)} fresh · ${fmtN(s.rewalkins)} re-walk-in` : 'punched in CRM'} />
-          <Metric t={t} label="Punch rate" value={fmtPctR(s.punch)} color={pc} sub="walk-ins ÷ footfall" />
+          <Metric t={t} label="CRM walk-ins" value={fmtN(s.allWalkins)} color={t.gold} sub={`${fmtN(s.allFresh)} fresh · ${fmtN(s.allRewalkins)} re-walk-in · ${fmtN(s.walkins)} at camera branches`} />
+          <Metric t={t} label="Punch rate" value={fmtPctR(s.punch)} color={pc} sub="camera-branch walk-ins ÷ footfall" />
           <Metric t={t} label="Not punched" value={fmtN(Math.max(0, s.gap))} color={s.gap > 0 ? (t.orange || t.gold) : t.green} sub="footfall − walk-ins" />
         </div>
         <div style={{ marginTop: 14, display: 'grid', gap: 6 }}>
