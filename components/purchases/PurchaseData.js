@@ -24,6 +24,7 @@ const DEFAULT_PAGE_KEY = pageCacheKey({
 
 const STATUS_COLORS = {
   at_branch:        { color: '#3a8fbf', label: 'At Branch' },
+  on_hold:          { color: '#bf8a3a', label: 'On Hold' },   // kept at branch — never consigned/booked (sql/purchases_on_hold_status.sql)
   at_ho:            { color: '#3aaa6a', label: 'At HO' },
   in_consignment:   { color: '#c9981f', label: 'In Transit' },
   sent_for_melting: { color: '#bf5a3a', label: 'Melting' },
