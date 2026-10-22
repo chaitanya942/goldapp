@@ -11,6 +11,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { requireAuth, requireAuthForPage, ROLE_GROUPS } from '../../../lib/apiAuth'
+import { sendMail, mailConfigured } from '../../../lib/sendMail'
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
@@ -18,6 +19,31 @@ const supabaseAdmin = createClient(
 )
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+async function findAuthUserByEmail(email) {
+  const target = email.toLowerCase()
+  for (let page = 1; page <= 20; page++) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 })
+    if (error || !data?.users?.length) return null
+    const hit = data.users.find(u => (u.email || '').toLowerCase() === target)
+    if (hit) return hit
+    if (data.users.length < 1000) return null
+  }
+  return null
+}
+
+const esc = (s) => String(s || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+
+function inviteHtml(name, link) {
+  return `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#222">
+  <h2 style="color:#9a7228;margin:0 0 16px">WhiteGold</h2>
+  <p>Hi${name ? ' ' + esc(name) : ''},</p>
+  <p>You've been invited to the WhiteGold app. Click below to set your password and sign in.</p>
+  <p style="margin:24px 0"><a href="${esc(link)}" style="background:#c9a84c;color:#111;padding:12px 22px;border-radius:8px;text-decoration:none;font-weight:bold">Accept invite</a></p>
+  <p style="font-size:12px;color:#777">If the button doesn't work, copy this link into your browser:<br>${esc(link)}</p>
+  <p style="font-size:12px;color:#777">This link can be used once.</p>
+</div>`
+}
 
 export async function POST(request) {
   // Try ADMIN first (preserves existing User Management behaviour); fall
@@ -58,17 +84,48 @@ export async function POST(request) {
       return Response.json({ error: `Role '${cleanRole}' does not exist.` }, { status: 400 })
     }
 
-    // 1. Send invite email via Supabase Admin API.
-    const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.inviteUserByEmail(
-      cleanEmail,
-      {
-        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm`,
-        data: { full_name: full_name?.trim() || '', role: cleanRole }
-      }
-    )
+    // 1. Create the invite link with Supabase, then email it ourselves via
+    //    Gmail SMTP (lib/sendMail — the same sender as scheduled reports).
+    //    Supabase's own invite mail (inviteUserByEmail) fails with "Error
+    //    sending invite email" — its SMTP setup is broken — so it's not used.
+    //    The link is identical to the one Supabase would have emailed.
+    if (!mailConfigured()) {
+      return Response.json({ error: 'Email is not configured on the server (GMAIL_USER / GMAIL_APP_PASSWORD).' }, { status: 500 })
+    }
+    const redirectTo = `${process.env.NEXT_PUBLIC_SITE_URL}/auth/confirm`
+    let { data: authData, error: authErr } = await supabaseAdmin.auth.admin.generateLink({
+      type: 'invite', email: cleanEmail,
+      options: { redirectTo, data: { full_name: full_name?.trim() || '', role: cleanRole } },
+    })
 
+    // Already registered: if they never signed in (e.g. an earlier invite email
+    // never arrived), re-send a set-password link instead of failing.
+    if (authErr && /already/i.test(authErr.message || '')) {
+      const existing = await findAuthUserByEmail(cleanEmail)
+      if (existing && !existing.last_sign_in_at) {
+        ;({ data: authData, error: authErr } = await supabaseAdmin.auth.admin.generateLink({
+          type: 'recovery', email: cleanEmail, options: { redirectTo },
+        }))
+      } else if (existing) {
+        return Response.json({ error: `${cleanEmail} already has an account and has signed in before.` }, { status: 400 })
+      }
+    }
     if (authErr) {
       return Response.json({ error: authErr.message }, { status: 400 })
+    }
+
+    const link = authData?.properties?.action_link
+    if (!link) return Response.json({ error: 'Could not create the invite link.' }, { status: 500 })
+    try {
+      await sendMail({
+        to: cleanEmail,
+        fromName: 'WhiteGold',
+        subject: 'You have been invited to WhiteGold',
+        html: inviteHtml(full_name?.trim(), link),
+        text: `You've been invited to the WhiteGold app. Set your password and sign in here:\n${link}\n\nThis link can be used once.`,
+      })
+    } catch (mailErr) {
+      return Response.json({ error: `The account was created but the invite email failed: ${mailErr.message}. Click Invite again to resend.` }, { status: 502 })
     }
 
     // 2. Insert profile row immediately so role is ready on first login.
