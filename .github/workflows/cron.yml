@@ -1,0 +1,66 @@
+# Frequent scheduled jobs while the app is served from Vercel (Railway's
+# goldapp-cron worker is down). Vercel's Hobby plan only allows once-a-day
+# crons — those nightly jobs are in vercel.json. This workflow covers the
+# frequent ones. GitHub runs schedules at most every 5 minutes, and they can
+# start a few minutes late under load.
+#
+# Needs repo settings → Secrets and variables → Actions:
+#   secret   CRON_SECRET  — same value as CRON_SECRET on Vercel
+#   variable APP_URL      — e.g. https://goldapp-inky.vercel.app
+#
+# Turn this off (Actions → "Scheduled jobs" → Disable workflow) once Railway's
+# goldapp-cron is running again, so the jobs don't run twice.
+
+name: Scheduled jobs
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: scheduled-jobs
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      APP_URL: ${{ vars.APP_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET }}
+    steps:
+      - name: Check configuration
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::Set the APP_URL variable and CRON_SECRET secret in repo settings"; exit 1
+          fi
+
+      - name: CRM sync
+        run: |
+          code=$(curl -s -o out.json -w '%{http_code}' --max-time 300 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/sync-new-crm")
+          echo "HTTP $code: $(head -c 400 out.json)"
+          [ "$code" -lt 400 ] || echo "::warning::CRM sync returned $code"
+
+      - name: Scheduled report emails
+        if: always()
+        run: |
+          code=$(curl -s -o out.json -w '%{http_code}' --max-time 300 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/reports")
+          echo "HTTP $code: $(head -c 400 out.json)"
+          [ "$code" -lt 400 ] || echo "::warning::Report dispatch returned $code"
+
+      - name: Email bounce scan
+        if: always()
+        run: |
+          code=$(curl -s -o out.json -w '%{http_code}' --max-time 120 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/consignments/scan-bounces")
+          echo "HTTP $code: $(head -c 400 out.json)"
+          [ "$code" -lt 400 ] || echo "::warning::Bounce scan returned $code"
+
+      - name: Jarvis footfall (every ~20 min)
+        if: always()
+        run: |
+          m=$(date -u +%M); m=$((10#$m))
+          if [ $((m % 20)) -ge 5 ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then echo "skip (minute $m)"; exit 0; fi
+          code=$(curl -s -o out.json -w '%{http_code}' --max-time 300 -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/jarvis")
+          echo "HTTP $code: $(head -c 400 out.json)"
+          [ "$code" -lt 400 ] || echo "::warning::Jarvis sync returned $code"
