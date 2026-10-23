@@ -52,7 +52,7 @@ import TelesalesDashboard from '../../components/telesales/TelesalesDashboard'
 import DialogHost from '../../components/ui/ConfirmDialog'
 import AuditAccessGuard from '../../components/AuditAccessGuard'
 import CancelRequestNotifier from '../../components/consignments/CancelRequestNotifier'
-import SyncHealthNotifier from '../../components/consignments/SyncHealthNotifier'
+// SyncHealthNotifier pop-up removed 2026-10-23 (component kept).
 import MeltingIncoming from '../../components/melting/MeltingIncoming'
 
 const THEMES = {
@@ -324,9 +324,8 @@ function DashboardShell() {
           nothing for other roles. */}
       <CancelRequestNotifier />
 
-      {/* SyncHealthNotifier — super-admin-only alert when a CRM sync stalls
-          (last successful run > ~10 min ago). Renders nothing for other roles. */}
-      <SyncHealthNotifier />
+      {/* SyncHealthNotifier (CRM-sync-stalled pop-up) removed 2026-10-23 at the
+          user's request — component kept in components/consignments/. */}
 
       {/* Exit-confirmation toast — surfaces when the user presses back on the
           dashboard. A second back press within 2.5s actually exits. Sits
