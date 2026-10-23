@@ -192,9 +192,22 @@ async function runSync(request) {
         -- paid, so it counts too. Without it, CONFIRMED bills (a completed txn
         -- whose only final payment is CONFIRMED) were silently dropped from the
         -- sync and stayed at their stale/zero values (e.g. WGKA-59290).
-        SELECT MAX(created_at) fp FROM "Payment"
-        WHERE transaction_id = t.id AND type = 'FINAL_PAYMENT'
-          AND (status IN ('COMPLETED', 'CONFIRMED') OR (status = 'PENDING' AND provider_status = 'processing'))
+        --
+        -- Release-only takeovers: a RELEASED_GOLD bill whose whole value went to
+        -- the lender has a completed RELEASE_PAYMENT and NO final payment at all
+        -- (nothing left to pay the customer). Such a bill is still a completed
+        -- purchase — date it by the release payment, otherwise it never syncs
+        -- and never reaches Branch Stock (e.g. WGKA-94532, Dharwad, 22 Oct).
+        SELECT COALESCE(
+          (SELECT MAX(created_at) FROM "Payment"
+            WHERE transaction_id = t.id AND type = 'FINAL_PAYMENT'
+              AND (status IN ('COMPLETED', 'CONFIRMED') OR (status = 'PENDING' AND provider_status = 'processing'))),
+          (SELECT MAX(created_at) FROM "Payment"
+            WHERE transaction_id = t.id AND type = 'RELEASE_PAYMENT'
+              AND status IN ('COMPLETED', 'CONFIRMED')
+              AND t.status = 'FINAL_PAYMENT_COMPLETED'
+              AND NOT EXISTS (SELECT 1 FROM "Payment" fp2 WHERE fp2.transaction_id = t.id AND fp2.type = 'FINAL_PAYMENT'))
+        ) fp
       ) fpay ON true
       LEFT JOIN orn ON orn.transaction_id = t.id
       -- Window on the FINAL-PAYMENT date, not created_at: a bill walked-in before
