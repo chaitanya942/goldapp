@@ -2,7 +2,7 @@
 
 **Database:** `dbwhitegold_production` (PostgreSQL, AWS Lightsail, `ls-…ap-south-1`)
 **Scope:** `Estimation`, `Ornament`, `Quotation`, `Spectrometer`, `GoldRate`, `Agreement`
-**Access:** read-only (`nighthack`, full R/W creds but app only SELECTs). All identifiers are **PascalCase and must be quoted**: `SELECT * FROM "Estimation"`.
+**Access:** read-only (`business@whitegold.money`, a read-only login). All identifiers are **PascalCase and must be quoted**: `SELECT * FROM "Estimation"`.
 **Captured:** 2026-08-06. Row counts and samples are live snapshots.
 
 > This is the **pricing engine** of the CRM — how a customer's gold is weighed, purity-tested, priced by purity band, negotiated, and turned into the final payout figure. The money-math section below is reconstructed and **arithmetically verified against real rows** (see §MONEY MATH).

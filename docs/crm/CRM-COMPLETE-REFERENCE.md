@@ -409,7 +409,7 @@ paid = Σ FINAL_PAYMENT/DEBITED  +  Σ RELEASE_PAYMENT/DEBITED  −  Σ FINAL_PA
 
 Exhaustive technical documentation of the "Reference & Org" tables in the White Gold **NEW CRM** Postgres database (`dbwhitegold_production`, AWS Lightsail/RDS, `ap-south-1`). Purely descriptive; access is **read-only** (SELECT only).
 
-- **Connection**: `NEW_CRM_DB_HOST` (`ls-…rds.amazonaws.com`), port `5432`, db `dbwhitegold_production`, user `nighthack`, SSL `rejectUnauthorized:false`. Credentials live in `c:\Users\chaithanya\goldapp\.env.local`.
+- **Connection**: `NEW_CRM_DB_HOST` (`ls-…rds.amazonaws.com`), port `5432`, db `dbwhitegold_production`, user `business@whitegold.money` (read-only, direct — no PgBouncer), SSL `rejectUnauthorized:false`. Credentials live in `c:\Users\chaithanya\goldapp\.env.local`.
 - **Convention**: All identifiers are PascalCase and **must be double-quoted** (`SELECT * FROM "Employee"`). Prisma-generated schema.
 - **Snapshot date**: 2026-08-06.
 
@@ -1933,7 +1933,7 @@ Customer (CUST-#####)
 
 **Database:** `dbwhitegold_production` (PostgreSQL, AWS Lightsail, `ls-…ap-south-1`)
 **Scope:** `Estimation`, `Ornament`, `Quotation`, `Spectrometer`, `GoldRate`, `Agreement`
-**Access:** read-only (`nighthack`, full R/W creds but app only SELECTs). All identifiers are **PascalCase and must be quoted**: `SELECT * FROM "Estimation"`.
+**Access:** read-only (`business@whitegold.money`, a read-only login). All identifiers are **PascalCase and must be quoted**: `SELECT * FROM "Estimation"`.
 **Captured:** 2026-08-06. Row counts and samples are live snapshots.
 
 > This is the **pricing engine** of the CRM — how a customer's gold is weighed, purity-tested, priced by purity band, negotiated, and turned into the final payout figure. The money-math section below is reconstructed and **arithmetically verified against real rows** (see §MONEY MATH).
@@ -3658,7 +3658,7 @@ Grep across `app/`, `lib/`, `scripts/`, `components/` for these table names retu
 
 > **Purpose.** Where the NEW CRM's data *originates*: the ingestion pipelines and third-party integrations that write into `dbwhitegold_production`. This is a companion to [00-CRM-MASTER.md](#part-toc) and the cluster docs — it does **not** re-dump the schema; it traces each table back to the external system (or human process) that produces its rows, with queried evidence.
 >
-> **Method.** Read-only (`SELECT` only) against the live prod RDS as user `nighthack`. The CRM's own **application source code is not available** — provenance is inferred from the DB itself plus integration fingerprints (id prefixes like `pout_`/`cont_`/`fa_`, callback URLs, GSTINs, API-key clients, S3 key prefixes, migration names). Every inference is flagged as such.
+> **Method.** Read-only (`SELECT` only) against the live prod RDS as user `business@whitegold.money` (read-only). The CRM's own **application source code is not available** — provenance is inferred from the DB itself plus integration fingerprints (id prefixes like `pout_`/`cont_`/`fa_`, callback URLs, GSTINs, API-key clients, S3 key prefixes, migration names). Every inference is flagged as such.
 > **Snapshot:** 2026-08-06 (counts drift upward as prod keeps writing). Identifiers PascalCase & quoted.
 
 ---
@@ -3852,7 +3852,7 @@ Queried provenance details:
 
 ## 9. Tech stack & history
 
-- **ORM/platform:** Prisma on **AWS RDS Postgres** (`dbwhitegold_production`, `ap-south-1`). `_prisma_migrations` = 347 migrations, all applied, none rolled back. The DB is **prod RDS**; the `nighthack` cred is full `rds_superuser` R/W, but **GoldApp only ever SELECTs** (read-only by convention).
+- **ORM/platform:** Prisma on **AWS RDS Postgres** (`dbwhitegold_production`, `ap-south-1`). `_prisma_migrations` = 347 migrations, all applied, none rolled back. The DB is **prod RDS**; the `business@whitegold.money` cred is full `rds_superuser` R/W, but **GoldApp only ever SELECTs** (read-only by convention).
 - **Schema-evolution arc:** migration *names* date from `20240430…` (Apr 2024: employee/branch → transaction → estimation → KYC/document → quotation → payment → leads), but every `started_at`/`finished_at` clusters on **2025-06-19** — the full back-catalog was replayed in one batch when this prod DB was (re)provisioned on 19 Jun 2025; migrations authored later apply on their real dates.
 - **Recent arc (queried latest 6):** May–Jun 2026 was a **performance push** (index migrations, incl. a spectro-`File` index) plus a **cascade-delete hardening** pass on Transaction/KYC/Agreement relations (Jun 14–15). Jul 2026 added **`added_call_meta_data`** (2026-07-01, the Meta Lead-Ads columns), **`added_is_offline_gold_rates`** and **`added_updated_by_to_gold_rate`** (both applied 2026-07-20) — the latter is the **most recent migration**.
 - **OLD CRM origin:** the OLD CRM is a separate **MySQL** DB; only a one-time backfill reached here — `Blocklist` rows dated back to **2021** (`remarks='OLD CRM Blocked Customer'`), while `OLDTransaction`/`OLDKyc` tables exist but are **empty** (never migrated).

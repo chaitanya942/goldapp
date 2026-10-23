@@ -440,7 +440,7 @@ table is missing. The super-admin in-app notifier polls this and alerts on `anyS
   ids per `.in()` URL — larger breaks the loop condition or silently over-runs the URL.
 - **Read-only, but not by role.** Both CRM creds are R/W superuser; SELECT-only is a
   convention. The local `scripts/*.mjs` embed **hardcoded** CRM credentials (the
-  `nighthack` MySQL superuser, the `marketing@` Postgres reader) — these, plus the
+  the old shared MySQL superuser, the `marketing@` Postgres reader) — these, plus the
   public repo holding `CRON_SECRET`, are the standing "make private + rotate" debt.
 - **Flagged bug:** `aliasBranchName`'s `/s+/g` (§7b).
 

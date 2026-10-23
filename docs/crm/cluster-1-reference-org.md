@@ -2,7 +2,7 @@
 
 Exhaustive technical documentation of the "Reference & Org" tables in the White Gold **NEW CRM** Postgres database (`dbwhitegold_production`, AWS Lightsail/RDS, `ap-south-1`). Purely descriptive; access is **read-only** (SELECT only).
 
-- **Connection**: `NEW_CRM_DB_HOST` (`ls-…rds.amazonaws.com`), port `5432`, db `dbwhitegold_production`, user `nighthack`, SSL `rejectUnauthorized:false`. Credentials live in `c:\Users\chaithanya\goldapp\.env.local`.
+- **Connection**: `NEW_CRM_DB_HOST` (`ls-…rds.amazonaws.com`), port `5432`, db `dbwhitegold_production`, user `business@whitegold.money` (read-only, direct — no PgBouncer), SSL `rejectUnauthorized:false`. Credentials live in `c:\Users\chaithanya\goldapp\.env.local`.
 - **Convention**: All identifiers are PascalCase and **must be double-quoted** (`SELECT * FROM "Employee"`). Prisma-generated schema.
 - **Snapshot date**: 2026-08-06.
 
