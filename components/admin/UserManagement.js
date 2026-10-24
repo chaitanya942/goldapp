@@ -60,7 +60,9 @@ function useMobile() {
 }
 
 export default function UserManagement() {
-  const { theme, canDo } = useApp()
+  const { theme, canDo, role: myRole } = useApp()
+  // Adding users is super-admin only (the API enforces the same).
+  const isSuperAdmin = myRole === 'super_admin'
   const t = THEMES[theme]
   const isMobile = useMobile()
 
@@ -147,7 +149,9 @@ export default function UserManagement() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Failed to send invite.')
 
-      setInvMsg({ type: 'success', text: `Invite sent to ${invEmail.trim()}. They will receive an email to set their password.` })
+      // No email is sent — the one-time password is shown here once for the
+      // super admin to hand over; the user must set their own on first sign-in.
+      setInvMsg({ type: 'success', text: `User created: ${data.email}. Share this one-time password with them — they'll set their own password on first sign-in. It won't be shown again.`, temp: data.temp_password })
       setInvEmail('')
       setInvName('')
       setInvRole('viewer')
@@ -262,9 +266,9 @@ export default function UserManagement() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
         <div>
           <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1, letterSpacing: '.04em' }}>User Management</div>
-          <div style={{ fontSize: '.72rem', color: t.text3, marginTop: '4px' }}>Invite team members and manage their access roles</div>
+          <div style={{ fontSize: '.72rem', color: t.text3, marginTop: '4px' }}>Add team members and manage their access roles</div>
         </div>
-        {canDo('edit') && (
+        {canDo('edit') && isSuperAdmin && (
           <button
             onClick={() => { setShowInvite(!showInvite); setInvMsg(null) }}
             style={{
@@ -299,7 +303,7 @@ export default function UserManagement() {
 
           {/* Tabs */}
           <div style={{ display: 'flex', gap: '4px', marginBottom: '20px', background: t.card2, borderRadius: '8px', padding: '3px', width: 'fit-content' }}>
-            {[{ key: 'invite', label: 'Invite via Email' }, { key: 'existing', label: 'Add Existing User' }].map(tab => (
+            {[{ key: 'invite', label: 'New User' }, { key: 'existing', label: 'Add Existing User' }].map(tab => (
               <button key={tab.key} onClick={() => { setInvTab(tab.key); setInvMsg(null) }}
                 style={{ padding: '6px 16px', fontSize: '.65rem', fontWeight: 600, borderRadius: '6px', border: 'none', cursor: 'pointer', transition: 'all .15s',
                   background: invTab === tab.key ? t.gold : 'transparent',
@@ -330,9 +334,9 @@ export default function UserManagement() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
               <button onClick={inviteUser} disabled={inviting || !invEmail.trim()}
                 style={{ background: inviting || !invEmail.trim() ? t.border2 : t.gold, border: 'none', borderRadius: '7px', padding: '9px 28px', color: '#0a0a0a', fontSize: '.75rem', fontWeight: 700, cursor: inviting || !invEmail.trim() ? 'not-allowed' : 'pointer', opacity: inviting || !invEmail.trim() ? .6 : 1 }}>
-                {inviting ? 'Sending…' : 'Send Invite →'}
+                {inviting ? 'Creating…' : 'Create User →'}
               </button>
-              <div style={{ fontSize: '.65rem', color: t.text4, lineHeight: 1.5 }}>User will receive an email with a link to set their password</div>
+              <div style={{ fontSize: '.65rem', color: t.text4, lineHeight: 1.5 }}>No email is sent — you'll get a one-time password to share; they set their own on first sign-in</div>
             </div>
           </>) : (<>
             <div style={{ fontSize: '.65rem', color: t.text4, marginBottom: '14px', lineHeight: 1.6, background: `${t.blue}10`, border: `1px solid ${t.blue}25`, borderRadius: '6px', padding: '8px 12px' }}>
@@ -377,6 +381,13 @@ export default function UserManagement() {
               lineHeight: 1.6,
             }}>
               {invMsg.text}
+              {invMsg.temp && (
+                <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <code style={{ fontSize: '1rem', fontWeight: 700, letterSpacing: '.08em', color: t.text1, background: t.card2, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '6px 12px', userSelect: 'all' }}>{invMsg.temp}</code>
+                  <button onClick={() => navigator.clipboard?.writeText(invMsg.temp)}
+                    style={{ background: 'transparent', border: `1px solid ${t.green}60`, borderRadius: '6px', padding: '6px 12px', color: t.green, fontSize: '.7rem', fontWeight: 600, cursor: 'pointer' }}>Copy</button>
+                </div>
+              )}
             </div>
           )}
         </div>

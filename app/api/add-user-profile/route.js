@@ -13,7 +13,8 @@ const serviceSupabase = createClient(
 )
 
 export async function POST(req) {
-  const auth = await requireAuth(req, { requiredRoles: ROLE_GROUPS.ADMIN })
+  // Adding users is super-admin only (same as /api/invite-user).
+  const auth = await requireAuth(req, { requiredRoles: ['super_admin'] })
   if (!auth.ok) return auth.response
 
   try {

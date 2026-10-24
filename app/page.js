@@ -145,6 +145,13 @@ export default function LoginPage() {
     if (err) { setError(err.message); setLoading(false); return }
     accessTokenRef.current = data.session?.access_token
 
+    // Added by a super admin with a temporary password → must set their own
+    // password before using the app.
+    if (data.user?.app_metadata?.must_reset_password) {
+      window.location.href = '/auth/reset'
+      return
+    }
+
     // Offer passkey registration if device supports it and not already saved for this email
     const savedData    = JSON.parse(localStorage.getItem('wg_passkey_data') || 'null')
     const alreadySaved = savedData?.email === email || localStorage.getItem('wg_passkey_email') === email

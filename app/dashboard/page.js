@@ -107,7 +107,14 @@ const ROLE_LABELS = {
 export { ROLE_LABELS }
 
 function DashboardShell() {
-  const { theme, activeNav, setActiveNav, role, canSee, profileLoaded, previewRole, mobileMenuOpen, setMobileMenuOpen, mobileMenuInitialModule, setMobileMenuInitialModule, openMobileMenuWithModule } = useApp()
+  const { user, theme, activeNav, setActiveNav, role, canSee, profileLoaded, previewRole, mobileMenuOpen, setMobileMenuOpen, mobileMenuInitialModule, setMobileMenuInitialModule, openMobileMenuWithModule } = useApp()
+
+  // First sign-in gate: an account added with a temporary password must set
+  // its own password (/auth/reset) before using the app — also catches anyone
+  // who closed the reset screen and reopened the app.
+  useEffect(() => {
+    if (user?.app_metadata?.must_reset_password) window.location.replace('/auth/reset')
+  }, [user])
   const t = THEMES[theme]
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [isMobile, setIsMobile] = useState(false)

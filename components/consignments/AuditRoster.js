@@ -100,7 +100,8 @@ const HISTORY_SECTIONS = [
 ]
 
 export default function AuditRoster() {
-  const { theme } = useApp()
+  const { theme, role: myRole } = useApp()
+  const canAddUsers = myRole === 'super_admin'  // adding users is super-admin only
   const t = THEMES[theme] || THEMES.dark
   const isMobile = useMobile()
   const [tab, setTab] = useState('shifts')
@@ -396,7 +397,7 @@ export default function AuditRoster() {
               onToggleAuditorActive={toggleAuditorActive}
             />
           )}
-          extras={(section, t) => extrasFor(section, t, () => setModalOpen(true))}
+          extras={(section, t) => canAddUsers ? extrasFor(section, t, () => setModalOpen(true)) : null}
         />
       )}
 
@@ -1682,6 +1683,7 @@ function AddAuditorModal({ t, isMobile = false, onClose, onAdded, onError }) {
   const [name, setName]    = useState('')
   const [email, setEmail]  = useState('')
   const [busy, setBusy]    = useState(false)
+  const [result, setResult] = useState(null)  // { name, email, temp } once created
 
   const submit = async () => {
     const cleanName  = name.trim()
@@ -1705,7 +1707,8 @@ function AddAuditorModal({ t, isMobile = false, onClose, onAdded, onError }) {
         onError(j.error || 'Invite failed')
         return
       }
-      onAdded(`Invited ${cleanName} (${cleanEmail}) as auditor.`)
+      // No email is sent — show the one-time password here for handover.
+      setResult({ name: cleanName, email: j.email || cleanEmail, temp: j.temp_password })
     } catch (e) {
       onError(e.message || 'Invite failed')
     } finally {
@@ -1714,6 +1717,26 @@ function AddAuditorModal({ t, isMobile = false, onClose, onAdded, onError }) {
   }
 
   if (typeof document === 'undefined') return null
+  if (result) {
+    const done = () => onAdded(`Added ${result.name} (${result.email}) as auditor.`)
+    return createPortal((
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: isMobile ? 'flex-end' : 'center', justifyContent: 'center', zIndex: 2000, padding: isMobile ? '0' : '20px', backdropFilter: 'blur(4px)' }}>
+        <div style={{ background: t.card, border: `1px solid ${t.gold}40`, borderRadius: isMobile ? '14px 14px 0 0' : '14px', width: '100%', maxWidth: '460px', padding: isMobile ? '18px' : '24px', boxShadow: '0 20px 60px rgba(0,0,0,.6)' }}>
+          <div style={{ fontSize: '15px', color: t.text1, fontWeight: 700 }}>Auditor added</div>
+          <div style={{ fontSize: '12px', color: t.text3, marginTop: '6px', lineHeight: 1.6 }}>
+            Share this one-time password with {result.name} ({result.email}). They'll set their own password on first sign-in. It won't be shown again.
+          </div>
+          <div style={{ marginTop: '14px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <code style={{ fontSize: '17px', fontWeight: 700, letterSpacing: '.08em', color: t.text1, background: t.card2 || t.card, border: `1px solid ${t.border}`, borderRadius: '6px', padding: '8px 14px', userSelect: 'all' }}>{result.temp}</code>
+            <button onClick={() => navigator.clipboard?.writeText(result.temp)} style={{ background: 'transparent', border: `1px solid ${t.green}60`, borderRadius: '7px', padding: '8px 14px', color: t.green, fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>Copy</button>
+          </div>
+          <div style={{ marginTop: '18px', display: 'flex', justifyContent: 'flex-end' }}>
+            <button onClick={done} style={{ background: t.gold, border: 'none', borderRadius: '7px', padding: '9px 22px', fontSize: '12px', fontWeight: 700, color: '#0a0a0a', cursor: 'pointer' }}>Done</button>
+          </div>
+        </div>
+      </div>
+    ), document.body)
+  }
   return createPortal((
     <div onClick={(e) => { if (e.target === e.currentTarget && !busy) onClose() }}
       style={{
@@ -1741,7 +1764,7 @@ function AddAuditorModal({ t, isMobile = false, onClose, onAdded, onError }) {
         <div style={{ padding: isMobile ? '14px 18px' : '20px 24px', borderBottom: `1px solid ${t.border}` }}>
           <div style={{ fontSize: '15px', color: t.text1, fontWeight: 700, letterSpacing: '-.01em' }}>Add auditor</div>
           <div style={{ fontSize: '11px', color: t.text4, marginTop: '4px' }}>
-            They'll get an invite email and a profile in both Audit Roster and User Management.
+            You'll get a one-time password to share. They set their own password on first sign-in, and appear in both Audit Roster and User Management.
           </div>
         </div>
         <div style={{ padding: isMobile ? '14px 18px' : '20px 24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>

@@ -8,20 +8,9 @@
 
 import crypto from 'crypto'
 import { requireMdmAuth, mdmAdmin } from '../../../../lib/mdmAuth'
+import { genTempPassword } from '../../../../lib/tempPassword'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-// One-time temporary password — shown once to the admin, never stored. The
-// user is forced to reset it on first login (app_metadata.mdm_must_reset).
-// 12 chars, unambiguous alphabet, guaranteed an upper + lower + digit.
-function genTempPassword() {
-  const U = 'ABCDEFGHJKLMNPQRSTUVWXYZ', L = 'abcdefghijkmnpqrstuvwxyz', D = '23456789'
-  const all = U + L + D
-  const b = crypto.randomBytes(12)
-  let p = U[b[0] % U.length] + L[b[1] % L.length] + D[b[2] % D.length]
-  for (let i = 3; i < 12; i++) p += all[b[i] % all.length]
-  return p
-}
 
 export async function GET(req) {
   const auth = await requireMdmAuth(req, { requireAdmin: true })

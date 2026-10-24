@@ -112,7 +112,17 @@ export default function ResetPasswordPage() {
     const { error } = await supabase.auth.updateUser({ password })
     if (error) { setStatus('error'); setMessage(error.message || 'Failed to reset password.'); return }
 
-    const { data: { session } } = await supabase.auth.getSession()
+    // First sign-in with a temporary password: clear the must-reset flag, then
+    // refresh the session so the new token no longer carries it (otherwise
+    // the dashboard gate would send them straight back here).
+    let { data: { session } } = await supabase.auth.getSession()
+    if (session?.user?.app_metadata?.must_reset_password) {
+      try {
+        await fetch('/api/auth/password-set', { method: 'POST', headers: { Authorization: `Bearer ${session.access_token}` } })
+        const { data: refreshed } = await supabase.auth.refreshSession()
+        if (refreshed?.session) session = refreshed.session
+      } catch { /* the gate re-checks on the dashboard */ }
+    }
     if (session?.access_token) setAccessToken(session.access_token)
 
     setStatus('success')
