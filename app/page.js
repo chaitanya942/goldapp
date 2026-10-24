@@ -166,6 +166,14 @@ export default function LoginPage() {
         body: JSON.stringify({ email: savedPasskeyEmail, credentialId: savedCredentialId }),
       })
       const options = await optRes.json()
+      if (options?.inactive) {
+        // The saved Face ID account is deactivated (e.g. the person moved to a
+        // new email) — forget it on this device and fall back to the email form.
+        localStorage.removeItem('wg_passkey_data'); localStorage.removeItem('wg_passkey_email')
+        setHasSavedPasskey(false); setSavedPasskeyEmail(''); setSavedCredentialId(null)
+        setError(options.error); setBiometricLoading(false)
+        return
+      }
       if (!optRes.ok) throw new Error(options.error || 'Failed to get options')
       const authnResponse = await startAuthentication({ optionsJSON: options })
       const verifyRes = await fetch('/api/webauthn/authenticate', {

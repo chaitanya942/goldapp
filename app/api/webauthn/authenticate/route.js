@@ -20,11 +20,12 @@ export async function POST(request) {
 
     const { data: profile } = await adminSupabase
       .from('user_profiles')
-      .select('id')
+      .select('id, is_active')
       .eq('email', email)
       .single()
 
     if (!profile) return Response.json({ error: 'User not found' }, { status: 404 })
+    if (profile.is_active === false) return Response.json({ error: 'This account has been deactivated. Sign in with your current email and password.', inactive: true }, { status: 403 })
 
     const { data: cred } = await adminSupabase
       .from('webauthn_credentials')

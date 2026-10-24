@@ -16,11 +16,15 @@ export async function POST(request) {
 
     const { data: profile } = await adminSupabase
       .from('user_profiles')
-      .select('id')
+      .select('id, is_active')
       .eq('email', email)
       .single()
 
     if (!profile) return Response.json({ error: 'No passkey found for this account' }, { status: 404 })
+    // A deactivated account must not sign in by Face ID (lib/apiAuth already
+    // refuses its API calls, so it would land on a broken dashboard). `inactive`
+    // tells the login page to forget the saved account and show the email form.
+    if (profile.is_active === false) return Response.json({ error: 'This account has been deactivated. Sign in with your current email and password.', inactive: true }, { status: 403 })
 
     // If a specific credential ID is stored on this device, only request that one
     const credQuery = adminSupabase
