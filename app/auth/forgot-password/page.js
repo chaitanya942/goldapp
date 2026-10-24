@@ -27,21 +27,11 @@ export default function ForgotPasswordPage() {
     }, 1000)
   }
 
-  // Sent by the app's own mailer (Gmail) via /api/auth/forgot-password —
-  // Supabase's resetPasswordForEmail fails ("Error sending … email").
   const sendReset = async (emailToSend) => {
-    try {
-      const res = await fetch('/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: emailToSend.trim() }),
-      })
-      if (res.ok) return null
-      const j = await res.json().catch(() => ({}))
-      return { message: j.error || 'Could not send the reset email.' }
-    } catch {
-      return { message: 'Network error — please try again.' }
-    }
+    const { error: err } = await supabase.auth.resetPasswordForEmail(emailToSend.trim(), {
+      redirectTo: `${window.location.origin}/auth/reset`,
+    })
+    return err
   }
 
   const handleSend = async () => {
