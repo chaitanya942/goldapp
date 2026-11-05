@@ -5,7 +5,7 @@
 // year exceeds ₹50,00,000, and their bills in the chosen window, in the Billed
 // vs Paid case-wise format plus FY-cumulative columns. Data: /api/fifty-lakh.
 
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, Fragment } from 'react'
 import { useApp } from '../../lib/context'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
@@ -46,7 +46,7 @@ export default function FiftyLakhTransactions() {
   const rows = useMemo(() => {
     const term = q.trim().toLowerCase()
     return (res?.rows || []).filter(r => !term ||
-      [r.app_id, r.customer, r.branch, r.region, r.mobile, r.utr, ...(r.utrs || [])].some(v => String(v || '').toLowerCase().includes(term)))
+      [r.app_id, r.customer, r.customer_name, ...(r.customer_names || []), ...(r.mobiles || []), r.branch, r.region, r.utr, ...(r.utrs || [])].some(v => String(v || '').toLowerCase().includes(term)))
   }, [res, q])
 
   function download() {
@@ -78,7 +78,7 @@ export default function FiftyLakhTransactions() {
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1, letterSpacing: '.03em' }}>50L+ Transactions</div>
           <div style={{ fontSize: 11, color: t.text3, marginTop: 4, maxWidth: 720, lineHeight: 1.5 }}>
-            Customers whose total final amount this financial year (from {fmtDate(res?.fy_start || '2026-04-01')}, old + new CRM) is more than ₹50,00,000, matched by mobile number — and their bills in the selected window, case-wise.
+            Customers whose total final amount this financial year (from {fmtDate(res?.fy_start || '2026-04-01')}, old + new CRM) is more than ₹50,00,000, with their bills in the selected window grouped under their name. A customer = same mobile, or the same full name at the same branch.
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -105,7 +105,7 @@ export default function FiftyLakhTransactions() {
 
       {s && (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <Stat label="Customers over ₹50L" value={s.customers} sub={`${s.customers_in_window} with bills in window`} color={t.gold} />
+          <Stat label="Customers over ₹50L" value={s.customers} sub={`${s.customers_in_window} with bills in window · ${s.multi_mobile_customers} with 2+ mobiles`} color={t.gold} />
           <Stat label="Bills in window" value={s.bills} sub={`${fmtDate(res.from)} → ${fmtDate(res.to)}`} />
           <Stat label="Window value" value={lakh(s.window_total)} color={t.green} sub="final amount" />
           <Stat label="FY bills checked" value={s.fy_bills_scanned.toLocaleString('en-IN')} sub={s.unidentified_bills ? `${s.unidentified_bills} without a mobile` : 'all matched by mobile'} />
@@ -126,24 +126,37 @@ export default function FiftyLakhTransactions() {
           <tbody>
             {rows.map((r, i) => {
               const iss = bvpIssues(r)
+              const newCustomer = i === 0 || rows[i - 1].customer_id !== r.customer_id
               return (
-                <tr key={r.app_id} style={{ background: r.crossed_here ? `${t.gold}10` : 'transparent' }}>
-                  <td style={{ ...td, color: t.text4 }}>{i + 1}</td>
-                  <td style={{ ...td, color: t.text1, fontWeight: 600 }}>{r.customer}</td>
-                  <td style={{ ...td, fontFamily: 'monospace' }}>{r.mobile}</td>
-                  <td style={{ ...td, fontFamily: 'monospace' }}>{r.app_id}</td>
-                  <td style={td}>{r.branch}</td>
-                  <td style={td}>{fmtDate(r.purchase_date)}</td>
-                  <td style={num}>{money(r.billed)}</td>
-                  <td style={{ ...num, color: r.fy_running > 5e6 ? t.gold : t.text2 }}>
-                    {money(r.fy_running)}{r.crossed_here && <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, color: t.gold }}>CROSSED 50L</span>}
-                  </td>
-                  <td style={{ ...num, color: t.text1, fontWeight: 700 }}>{lakh(r.fy_total)}<span style={{ color: t.text4, fontWeight: 400 }}> · {r.fy_bills} bill{r.fy_bills === 1 ? '' : 's'}</span></td>
-                  <td style={num}>{money(r.paid)}</td>
-                  <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }}>{(r.fin_acct || r.pen_acct) || '—'}{(r.fin_ifsc || r.pen_ifsc) ? ` · ${r.fin_ifsc || r.pen_ifsc}` : ''}</td>
-                  <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }}>{(r.utrs || []).join(' ') || '—'}</td>
-                  <td style={td}>{iss.length ? iss.map(x => <span key={x.k} style={{ fontSize: 10, fontWeight: 700, color: t.red, background: `${t.red}14`, borderRadius: 5, padding: '2px 6px', marginRight: 4 }}>{x.label}</span>) : <span style={{ color: t.green, fontSize: 11 }}>OK</span>}</td>
-                </tr>
+                <Fragment key={r.app_id}>
+                  {newCustomer && (
+                    <tr style={{ background: `${t.gold}0c` }}>
+                      <td colSpan={13} style={{ ...td, padding: '10px 10px 8px', borderBottom: `1px solid ${t.gold}30`, whiteSpace: 'normal' }}>
+                        <span style={{ color: t.text1, fontWeight: 700, fontSize: 12.5 }}>{r.customer_name}</span>
+                        <span style={{ color: t.gold, fontWeight: 700, fontFamily: 'monospace', marginLeft: 10 }}>FY total {lakh(r.fy_total)}</span>
+                        <span style={{ color: t.text3, marginLeft: 10 }}>{r.fy_bills} bill{r.fy_bills === 1 ? '' : 's'} this FY · {(r.mobiles || []).join(', ')}</span>
+                        {(r.customer_names || []).length > 1 && <span style={{ color: t.text4, marginLeft: 10, fontSize: 10.5 }}>also as: {r.customer_names.filter(n => n !== r.customer_name).join(', ')}</span>}
+                      </td>
+                    </tr>
+                  )}
+                  <tr style={{ background: r.crossed_here ? `${t.gold}10` : 'transparent' }}>
+                    <td style={{ ...td, color: t.text4 }}>{i + 1}</td>
+                    <td style={{ ...td, color: t.text2 }}>{r.customer}</td>
+                    <td style={{ ...td, fontFamily: 'monospace' }}>{r.mobile}</td>
+                    <td style={{ ...td, fontFamily: 'monospace' }}>{r.app_id}</td>
+                    <td style={td}>{r.branch}</td>
+                    <td style={td}>{fmtDate(r.purchase_date)}</td>
+                    <td style={num}>{money(r.billed)}</td>
+                    <td style={{ ...num, color: r.fy_running > 5e6 ? t.gold : t.text2 }}>
+                      {money(r.fy_running)}{r.crossed_here && <span style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, color: t.gold }}>CROSSED 50L</span>}
+                    </td>
+                    <td style={{ ...num, color: t.text3 }}>{lakh(r.fy_total)}</td>
+                    <td style={num}>{money(r.paid)}</td>
+                    <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }}>{(r.fin_acct || r.pen_acct) || '—'}{(r.fin_ifsc || r.pen_ifsc) ? ` · ${r.fin_ifsc || r.pen_ifsc}` : ''}</td>
+                    <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }}>{(r.utrs || []).join(' ') || '—'}</td>
+                    <td style={td}>{iss.length ? iss.map(x => <span key={x.k} style={{ fontSize: 10, fontWeight: 700, color: t.red, background: `${t.red}14`, borderRadius: 5, padding: '2px 6px', marginRight: 4 }}>{x.label}</span>) : <span style={{ color: t.green, fontSize: 11 }}>OK</span>}</td>
+                  </tr>
+                </Fragment>
               )
             })}
             {!rows.length && !loading && (
@@ -152,7 +165,7 @@ export default function FiftyLakhTransactions() {
           </tbody>
         </table>
       </div>
-      <div style={{ fontSize: 10.5, color: t.text4 }}>The CSV has every Billed vs Paid case-wise column plus Mobile, FY cumulative, customer FY total, FY bill count and the bill that crossed ₹50L.</div>
+      <div style={{ fontSize: 10.5, color: t.text4 }}>The CSV lists each customer's bills under a heading row (name, all mobiles, FY total), with every Billed vs Paid case-wise column plus customer group, mobiles, name variants, FY cumulative, FY total, FY bill count and the bill that crossed ₹50L.</div>
     </div>
   )
 }
