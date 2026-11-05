@@ -13,6 +13,7 @@ import GoldSpinner from '../ui/GoldSpinner'
 import { authedFetch } from '../../lib/authedFetch'
 import { CONSIGNMENT_THEMES as THEMES } from '../../lib/consignmentTheme'
 import { istToday, istDaysAgo } from '../../lib/dateIst'
+import { bvpIssues, BVP_HEADER, bvpRowCells } from '../../lib/billedVsPaidFormat'
 
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -27,15 +28,7 @@ const money  = (n) => n == null ? '—' : '₹' + Math.round(Number(n)).toLocale
 const fmtDate = (d) => { if (!d) return '—'; const [y, m, dd] = d.split('-'); return `${dd} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m-1]} ${y}` }
 
 // Per-row reconciliation issues → drives the Status column + row highlight.
-function issues(r) {
-  const out = []
-  if (r.paid == null || r.paid === 0)          out.push({ k: 'unpaid', label: 'Unpaid' })
-  if (r.paid != null && Math.abs(r.diff) > 1)  out.push({ k: 'amount', label: 'Amount ≠' })
-  if (r.acct_match === false)                  out.push({ k: 'acct',   label: 'Wrong a/c' })
-  if (r.payout_sum_match === false)            out.push({ k: 'psum',   label: 'Payout ≠' })
-  if (r.payout_acct_match === false)           out.push({ k: 'pacct',  label: 'Payout a/c' })
-  return out
-}
+const issues = bvpIssues
 
 export default function BilledVsPaid() {
   const { theme } = useApp()
@@ -84,23 +77,7 @@ export default function BilledVsPaid() {
     if (!rows.length) return
     await loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js')
     const XLSX = window.XLSX
-    const header = ['#', 'Customer', 'Bill / App ID', 'Branch', 'Region', 'CRM', 'Purchase Date',
-      'Penny Drop (₹)', 'Release (₹)', 'Final (₹)', 'Billed (₹)',
-      'Paid – CRM (₹)', 'Paid – Bank (₹)', 'Payouts', 'Payout Status',
-      'Diff (₹)', 'Account No', 'IFSC', 'PAN', 'UTR(s)',
-      'Account Match', 'Payout Sum Match', 'Payout A/c Match', 'Issues']
-    const aoa = [header, ...rows.map((r, i) => [
-      i + 1, r.customer, r.app_id, r.branch, r.region, r.crm.toUpperCase(), r.purchase_date,
-      r.penny == null ? '' : Math.round(r.penny), r.release == null ? '' : Math.round(r.release), r.final == null ? '' : Math.round(r.final),
-      Math.round(r.billed),
-      r.paid_crm == null ? '' : Math.round(r.paid_crm), r.paid_bank == null ? '' : Math.round(r.paid_bank),
-      r.payout_count || '', r.payout_status || '',
-      r.diff == null ? '' : Math.round(r.diff), r.fin_acct || r.pen_acct, r.fin_ifsc || r.pen_ifsc, r.pan, (r.utrs || []).join(' '),
-      r.acct_match == null ? '' : (r.acct_match ? 'MATCH' : 'MISMATCH'),
-      r.payout_sum_match == null ? '' : (r.payout_sum_match ? 'MATCH' : 'MISMATCH'),
-      r.payout_acct_match == null ? '' : (r.payout_acct_match ? 'MATCH' : 'MISMATCH'),
-      issues(r).map(x => x.label).join('; '),
-    ])]
+    const aoa = [BVP_HEADER, ...rows.map(bvpRowCells)]
     const ws = XLSX.utils.aoa_to_sheet(aoa)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Billed vs Paid')
