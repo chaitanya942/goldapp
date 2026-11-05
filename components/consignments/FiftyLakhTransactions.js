@@ -165,7 +165,7 @@ export default function FiftyLakhTransactions() {
           </tbody>
         </table>
       </div>
-      <div style={{ fontSize: 10.5, color: t.text4 }}>The CSV lists each customer's bills under a heading row (name, all mobiles, FY total), with every Billed vs Paid case-wise column plus customer group, mobiles, name variants, FY cumulative, FY total, FY bill count and the bill that crossed ₹50L.</div>
+      <div style={{ fontSize: 10.5, color: t.text4 }}>The CSV is a plain table, one row per bill: every Billed vs Paid case-wise column plus Customer Group, all mobiles, name variants, FY cumulative, FY total, FY bill count and the bill that crossed 50L. Each customer's bills are consecutive.</div>
     </div>
   )
 }
