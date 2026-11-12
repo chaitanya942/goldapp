@@ -75,11 +75,11 @@ export default function OtpChannelsSection({ t, isMobile }) {
         <div style={{ fontSize: 11, color: C[ch], textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700 }}>{label} <span style={{ color: t.text4 }}>· {ch}</span></div>
         <div style={{ fontSize: 24, fontWeight: 700, color: t.text1, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{fmtN(x?.otps)} <span style={{ fontSize: 12, color: t.text3, fontWeight: 500 }}>OTPs</span></div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 8, marginTop: 10 }}>
-          {[['Walked in', x?.walked_in, x?.walkin_rate], ['Purchased', x?.purchased, x?.purchase_rate], ['Value', null, null, x?.purchase_value]].map(([lab, n, rate, val]) => (
+          {[['Walked in', x?.walked_in, x?.walkin_rate, null, 'of OTPs'], ['Purchased', x?.purchased, x?.purchase_rate, null, 'of walk-ins'], ['Value', null, null, x?.purchase_value]].map(([lab, n, rate, val, of]) => (
             <div key={lab} style={{ minWidth: 0 }}>
               <div style={{ fontSize: 10, color: t.text4, textTransform: 'uppercase', letterSpacing: '.06em', fontWeight: 600 }}>{lab}</div>
               <div style={{ fontSize: 15, fontWeight: 700, color: t.text1, fontVariantNumeric: 'tabular-nums' }}>{val != null ? fmtCr(val) : fmtN(n)}</div>
-              {rate != null && <div style={{ fontSize: 10.5, color: t.text3 }}>{fmtPct(rate)} of OTPs</div>}
+              {rate != null && <div style={{ fontSize: 10.5, color: t.text3 }}>{fmtPct(rate)} {of}</div>}
             </div>
           ))}
         </div>
@@ -95,7 +95,7 @@ export default function OtpChannelsSection({ t, isMobile }) {
         <div style={{ width: 3, height: 20, borderRadius: 2, background: `linear-gradient(180deg,${t.blue},${t.gold})`, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: isMobile ? 12.5 : 14, color: t.text2, letterSpacing: isMobile ? '.08em' : '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Telesales vs Direct Walk-in</div>
-          {open && <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>By CRM OTP generation (TS / DW) · from 1 Oct 2026</div>}
+          {open && <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>By CRM OTP (TS / DW) · OTPs by day generated, walk-ins by walk-in day, purchases by payment day · from 1 Oct 2026</div>}
         </div>
         <div style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, background: `${t.gold}12`, border: `1px solid ${t.gold}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.gold, fontSize: 11, transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .3s' }}>▼</div>
       </div>
@@ -146,8 +146,8 @@ export default function OtpChannelsSection({ t, isMobile }) {
                       <thead>
                         <tr>
                           <th style={{ ...th, textAlign: 'left' }}>{sec.key === 'region' ? 'Region' : 'Branch'}</th>
-                          <th style={{ ...th, color: C.TS }}>TS OTPs</th><th style={{ ...th, color: C.TS }}>TS walked in</th><th style={{ ...th, color: C.TS }}>TS purchased</th>
-                          <th style={{ ...th, color: C.DW }}>DW OTPs</th><th style={{ ...th, color: C.DW }}>DW purchased</th>
+                          <th style={{ ...th, color: C.TS }}>TS OTPs</th><th style={{ ...th, color: C.TS }}>TS walk-ins</th><th style={{ ...th, color: C.TS }}>TS purchased</th>
+                          <th style={{ ...th, color: C.DW }}>DW walk-ins</th><th style={{ ...th, color: C.DW }}>DW purchased</th>
                           <th style={th}>TS share</th>
                         </tr>
                       </thead>
@@ -160,7 +160,7 @@ export default function OtpChannelsSection({ t, isMobile }) {
                               <td style={td}>{fmtN(x.TS.otps)}</td>
                               <td style={td}>{fmtN(x.TS.walked_in)} <span style={{ color: t.text4, fontSize: 11 }}>{fmtPct(x.TS.otps ? x.TS.walked_in / x.TS.otps : null)}</span></td>
                               <td style={td}>{fmtN(x.TS.purchased)}</td>
-                              <td style={td}>{fmtN(x.DW.otps)}</td>
+                              <td style={td}>{fmtN(x.DW.walked_in)}</td>
                               <td style={td}>{fmtN(x.DW.purchased)}</td>
                               <td style={td}>{fmtPct(tot ? x.TS.otps / tot : null)}</td>
                             </tr>
