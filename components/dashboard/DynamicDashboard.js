@@ -23,6 +23,7 @@ import MonthProjection from './MonthProjection'
 import BusinessCalendarInsight from './BusinessCalendarInsight'
 import JarvisFootfallCard from './JarvisFootfallCard'
 import JarvisFootfallSection from './JarvisFootfallSection'
+import OtpChannelsSection from './OtpChannelsSection'
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 const MONTHS   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -1205,6 +1206,9 @@ export default function DynamicDashboard() {
       )}
 
       {/* ── Jarvis · store footfall ── */}
+      {/* ── Telesales vs Direct Walk-in (CRM OTP generation) — same audience as the live walk-in tiles ── */}
+      {canSee('tab.purchase-data.live') && <OtpChannelsSection t={t} isMobile={isMobile} />}
+
       {canSeeJarvis(userProfile?.role, userProfile?.email) && <JarvisFootfallSection t={t} isMobile={isMobile} />}
 
       {/* ── Telesales ── */}

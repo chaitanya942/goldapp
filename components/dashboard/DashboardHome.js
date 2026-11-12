@@ -18,6 +18,7 @@ import TodaysBookingsWidget from './TodaysBookingsWidget'
 import BusinessCalendarInsight from './BusinessCalendarInsight'
 import JarvisFootfallCard from './JarvisFootfallCard'
 import JarvisFootfallSection from './JarvisFootfallSection'
+import OtpChannelsSection from './OtpChannelsSection'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const fmtDate = (iso) => { if (!iso) return ''; const [y,m,d] = iso.split('-'); return `${d}-${MONTHS[+m-1]}-${y}` }
@@ -1938,6 +1939,9 @@ export default function DashboardHome() {
           </div>
         </div>
       </div>}
+
+      {/* ── Telesales vs Direct Walk-in (CRM OTP generation) ── */}
+      <OtpChannelsSection t={t} isMobile={isMobile} />
 
       {/* ── JARVIS · STORE FOOTFALL (collapsible) ── */}
       {canSeeJarvis(userProfile?.role, userProfile?.email) && <JarvisFootfallSection t={t} isMobile={isMobile} />}
