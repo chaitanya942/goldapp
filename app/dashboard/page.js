@@ -18,6 +18,7 @@ import ImportLogs from '../../components/admin/ImportLogs'
 import RoleManagement from '../../components/admin/RoleManagement'
 import HeatmapInsights from '../../components/admin/HeatmapInsights'
 import DashboardAuditLog from '../../components/admin/DashboardAuditLog'
+import DataHealth from '../../components/admin/DataHealth'
 import DynamicDashboard from '../../components/dashboard/DynamicDashboard'
 import PurchaseHub   from '../../components/purchases/PurchaseHub'
 import LiveFeed      from '../../components/purchases/LiveFeed'
@@ -294,6 +295,7 @@ function DashboardShell() {
       case 'inbound-bot':         return <InboundBotTesting />
       case 'heatmap-insights':    return ['super_admin', 'founders_office', 'admin'].includes(role) ? <HeatmapInsights /> : <AccessDenied />
       case 'dashboard-audit-log': return role === 'super_admin' ? <DashboardAuditLog /> : <AccessDenied />
+      case 'data-health':         return role === 'super_admin' ? <DataHealth /> : <AccessDenied />
       default:                    return <DashboardHome />
     }
   }

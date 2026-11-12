@@ -40,6 +40,7 @@ const BRANCH_SYNC_URL      = `${APP_URL}/api/sync-branches-auto`
 const REPORT_DISPATCH_URL  = `${APP_URL}/api/reports/dispatch`
 const BOUNCE_SCAN_URL      = `${APP_URL}/api/consignments/scan-bounces`
 const JARVIS_SYNC_URL      = `${APP_URL}/api/sync-jarvis`
+const DATA_HEALTH_URL      = `${APP_URL}/api/data-health`
 const HEADERS              = { Authorization: `Bearer ${CRON_SECRET}` }
 // /api/eod-inventory-snapshot POST + /api/bidding/section1-audit POST both
 // gate on x-cron-token (not Bearer).
@@ -288,6 +289,32 @@ async function syncOnce() {
   // plus a full 15-day pass once per IST day (Jarvis serves only 15 days and
   // revises counts after its staff-reduction run).
   maybeSyncJarvis().catch(() => null)
+
+  // Piggy-back the data-accuracy checks (purchases vs CRM, walk-ins / OTP
+  // split vs CRM, Jarvis freshness) every 30 min — the endpoint self-heals by
+  // re-running the CRM / Jarvis sync and emails DATA_HEALTH_EMAILS on failure.
+  maybeRunDataHealth().catch(() => null)
+}
+
+let lastHealthMs = 0
+let inFlightHealth = false
+const DATA_HEALTH_EVERY_MS = 30 * 60 * 1000
+async function maybeRunDataHealth() {
+  const now = Date.now()
+  if (inFlightHealth || now - lastHealthMs < DATA_HEALTH_EVERY_MS) return
+  inFlightHealth = true
+  lastHealthMs = now
+  try {
+    const res = await fetch(DATA_HEALTH_URL, { method: 'POST', headers: { 'x-cron-token': CRON_SECRET } })
+    const j = await res.json().catch(() => ({}))
+    if (!res.ok) { console.error(new Date().toISOString(), `[cron-sync] data health FAIL ${res.status}`, j.error || ''); return }
+    const bad = (j.results || []).filter(r => !r.ok)
+    console.log(new Date().toISOString(), `[cron-sync] data health ${bad.length ? 'PROBLEMS: ' + bad.map(r => `${r.key} — ${r.detail}`).join(' | ') : 'all checks OK'}${(j.results || []).some(r => r.healed) ? ' (self-healed)' : ''}`)
+  } catch (err) {
+    console.error(new Date().toISOString(), '[cron-sync] data health threw:', err?.message || err)
+  } finally {
+    inFlightHealth = false
+  }
 }
 
 let lastJarvisSyncMs = 0

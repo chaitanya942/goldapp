@@ -72,6 +72,7 @@ const ADMIN_ITEMS = [
       { id: 'role-management',   label: 'Role Management',   dot: '#e05555' },
       { id: 'heatmap-insights',  label: 'Heatmap Insights',  dot: '#e58a3b' },
       { id: 'dashboard-audit-log', label: 'Dashboard Audit Log', dot: '#5ec1d6' },
+      { id: 'data-health',       label: 'Data Health',       dot: '#3aaa6a' },
     ]
   },
 ]
