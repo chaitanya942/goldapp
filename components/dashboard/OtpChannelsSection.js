@@ -14,10 +14,12 @@ const PERIODS = [
   { key: 'today', label: 'Today' }, { key: 'yesterday', label: 'Yesterday' },
   { key: 'week', label: 'This Week' }, { key: 'last_week', label: 'Last Week' },
   { key: 'mtd', label: 'MTD' }, { key: 'prev', label: 'Prev Month' }, { key: 'ytd', label: 'YTD' },
+  { key: 'custom', label: 'Custom' },
 ]
 
-// Same periods as the dashboard; ranges never start before 1 Oct 2026.
-function rangeFor(key) {
+// Same periods as the dashboard (+ Custom); ranges never start before 1 Oct
+// 2026 and never end after today.
+function rangeFor(key, custom) {
   const now = istNow(), y = now.getUTCFullYear(), m = now.getUTCMonth(), today = istStr(now)
   const pad = (n) => String(n).padStart(2, '0')
   let r
@@ -27,6 +29,10 @@ function rangeFor(key) {
   else if (key === 'mtd') r = { from: `${y}-${pad(m + 1)}-01`, to: today }
   else if (key === 'prev') { const pm = m === 0 ? 11 : m - 1, py = m === 0 ? y - 1 : y, last = new Date(Date.UTC(py, pm + 1, 0)).getUTCDate(); r = { from: `${py}-${pad(pm + 1)}-01`, to: `${py}-${pad(pm + 1)}-${pad(last)}` } }
   else if (key === 'ytd') r = { from: m >= 3 ? `${y}-04-01` : `${y - 1}-04-01`, to: today }
+  else if (key === 'custom') {
+    const to = custom?.to && custom.to < today ? custom.to : today
+    r = { from: custom?.from && custom.from <= to ? custom.from : to, to }
+  }
   else r = { from: today, to: today }
   if (r.from < DATA_START) r = { ...r, from: DATA_START }
   return r.to < DATA_START ? { from: null, to: null } : r
@@ -40,9 +46,11 @@ const fmtDay = (d) => { const [, m, dd] = d.split('-'); return `${dd}/${m}` }
 export default function OtpChannelsSection({ t, isMobile }) {
   const [open, setOpen] = useState(true)
   const [period, setPeriod] = useState('mtd')
+  const [custom, setCustom] = useState(() => { const t2 = istStr(istNow()); return { from: `${t2.slice(0, 7)}-01`, to: t2 } })
   const [state, setState] = useState({ loading: true, data: null, error: null })
   const [showAll, setShowAll] = useState(false)
-  const { from, to } = rangeFor(period)
+  const { from, to } = rangeFor(period, custom)
+  const today = istStr(istNow())
 
   const load = useCallback(async () => {
     if (!from) { setState({ loading: false, data: null, error: null }); return }
@@ -104,7 +112,22 @@ export default function OtpChannelsSection({ t, isMobile }) {
         <div style={{ padding: isMobile ? '14px' : '18px 24px 22px' }}>
           <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', marginBottom: 14, alignItems: 'center' }}>
             {PERIODS.map(p => <button key={p.key} onClick={() => setPeriod(p.key)} style={pill(period === p.key)}>{p.label}</button>)}
-            <span style={{ fontSize: 11.5, color: t.text3, marginLeft: 6, whiteSpace: 'nowrap' }}>{from ? (from === to ? from : `${from} → ${to}`) : 'No data before 1 Oct 2026'}</span>
+            {period === 'custom' ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 6, flexShrink: 0 }}>
+                {['from', 'to'].map((k, i) => (
+                  <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    {i === 1 && <span style={{ fontSize: 11.5, color: t.text3 }}>→</span>}
+                    <input type="date" value={custom[k] || ''}
+                      min={k === 'from' ? DATA_START : (custom.from || DATA_START)}
+                      max={k === 'from' ? (custom.to || today) : today}
+                      onChange={e => e.target.value && setCustom(c => ({ ...c, [k]: e.target.value }))}
+                      style={{ background: t.card, color: t.text1, border: `1px solid ${t.border}`, borderRadius: 8, padding: '4px 8px', fontSize: 12, colorScheme: 'light dark' }} />
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <span style={{ fontSize: 11.5, color: t.text3, marginLeft: 6, whiteSpace: 'nowrap' }}>{from ? (from === to ? from : `${from} → ${to}`) : 'No data before 1 Oct 2026'}</span>
+            )}
           </div>
 
           {state.error && !d && <div style={{ fontSize: 13, color: t.red }}>Couldn&apos;t load: {state.error}</div>}
