@@ -31,7 +31,7 @@ const CSV_COLS = [
   ['Bank Confirmation (min)', r => r.bank_min], ['Status', r => r.status], ['UTR', r => r.utr],
   ['Payout Screenshots', r => r.screenshots], ['Timing Basis', r => r.basis],
 ]
-const cell = (v) => { const s = v == null ? '' : String(v).replace(/[^\x20-\x7E]/g, ' ').replace(/\s+/g, ' ').trim(); return /[",]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
+const cell = (v) => { const s = v == null ? '' : String(v).replace(/→/g, ' to ').replace(/[^\x20-\x7E]/g, ' ').replace(/\s+/g, ' ').trim(); return /[",]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s }
 
 export async function GET(req) {
   const auth = await requireAuthForPage(req, 'finance-performance')
