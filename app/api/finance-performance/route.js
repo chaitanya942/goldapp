@@ -27,7 +27,6 @@ const CSV_COLS = [
   ['Branch', r => r.branch], ['Region', r => r.region], ['Employee', r => r.emp_name || 'Not recorded'],
   ['Employee Code', r => r.emp_code], ['Designation', r => r.designation], ['Landed In Queue (IST)', r => r.landed_ist],
   ['Actioned (IST)', r => r.actioned_ist], ['Time In Queue (min)', r => r.wait_min],
-  ['Time To View Bill (min)', r => r.view_bill_min ?? 'Not recorded in CRM'], ['Time To First Click (min)', r => r.first_click_min ?? 'Not recorded in CRM'],
   ['Bank Confirmation (min)', r => r.bank_min], ['Status', r => r.status], ['UTR', r => r.utr],
   ['Payout Screenshots', r => r.screenshots], ['Timing Basis', r => r.basis],
 ]

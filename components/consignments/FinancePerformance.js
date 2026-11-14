@@ -85,8 +85,8 @@ export default function FinancePerformance() {
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr>
-            <th style={{ ...th, textAlign: 'left' }}>{keyLabel}</th><th style={th}>Requests</th><th style={th}>Avg</th><th style={th}>Median</th><th style={th}>90th %ile</th><th style={th}>Max</th>
-            <th style={th}>&gt; 10 min</th><th style={th}>&gt; 15 min</th><th style={th}>&gt; 20 min</th><th style={th}>View bill (median)</th><th style={th}>First click (median)</th>
+            <th style={{ ...th, textAlign: 'left' }}>{keyLabel}</th><th style={th}>Bills</th><th style={th}>Avg</th><th style={th}>Median</th><th style={th}>90th %ile</th><th style={th}>Max</th>
+            <th style={th}>&gt; 10 min</th><th style={th}>&gt; 15 min</th><th style={th}>&gt; 20 min</th>
           </tr></thead>
           <tbody>
             {list.map(x => (
@@ -97,10 +97,9 @@ export default function FinancePerformance() {
                 <td style={{ ...td, color: x.over10 ? (t.orange || t.gold) : t.text3 }}>{x.over10}</td>
                 <td style={{ ...td, color: x.over15 ? (t.orange || t.gold) : t.text3 }}>{x.over15}</td>
                 <td style={{ ...td, color: x.over20 ? t.red : t.text3 }}>{x.over20}</td>
-                {[x.view_bill_median_min, x.first_click_median_min].map((v, i) => <td key={i} style={{ ...td, color: v == null ? t.text4 : t.text2 }}>{v == null ? 'not recorded' : fmtMin(v)}</td>)}
               </tr>
             ))}
-            {!list.length && <tr><td colSpan={11} style={{ ...td, textAlign: 'center', color: t.text3, padding: 18 }}>No requests for these filters.</td></tr>}
+            {!list.length && <tr><td colSpan={9} style={{ ...td, textAlign: 'center', color: t.text3, padding: 18 }}>No bills for these filters.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -113,7 +112,7 @@ export default function FinancePerformance() {
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1 }}>Finance Performance</div>
           <div style={{ fontSize: 11.5, color: t.text3, marginTop: 4, maxWidth: 760, lineHeight: 1.5 }}>
-            Finance employees only. Time from when a payment request lands in the queue to when it&apos;s actioned — final payment (penny drop done → payout) and release (agreement signed → paid) measure the finance employee. Penny drop (Razorpay check: API request sent → approved) and manual payment are shown as processing time, not attributed to branch staff. Bill-view and first-click times appear once the CRM logs them.
+            Finance employees only. Time from when a payment request lands in the queue to when it&apos;s actioned — final payment (penny drop done → payout) and release (agreement signed → paid) measure the finance employee. Penny drop (Razorpay check: API request sent → approved) and manual payment are shown as processing time, not attributed to branch staff.
           </div>
         </div>
         <button onClick={downloadCsv} disabled={!d?.case_count}
@@ -132,7 +131,7 @@ export default function FinancePerformance() {
         )) : <span style={{ fontSize: 11.5, color: t.text3, marginLeft: 6, whiteSpace: 'nowrap' }}>{from === to ? from : `${from} → ${to}`}</span>}
       </div>
       <div style={row}>
-        <button onClick={() => setTypes([])} style={pill(!types.length)}>All requests</button>
+        <button onClick={() => setTypes([])} style={pill(!types.length)}>All types</button>
         {TYPES.map(([k, l]) => <button key={k} onClick={() => setTypes(ts => ts.includes(k) ? ts.filter(x => x !== k) : [...ts, k])} style={pill(types.includes(k))}>{l}</button>)}
         <span style={{ width: 1, height: 18, background: t.border, margin: '0 6px', flexShrink: 0 }} />
         {THRESHOLDS.map(([v, l]) => <button key={v} onClick={() => setMin(v)} style={pill(min === v)}>{l}</button>)}
@@ -149,17 +148,17 @@ export default function FinancePerformance() {
 
       {d && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, opacity: state.loading ? 0.55 : 1, transition: 'opacity .2s' }}>
-          <SummaryTable title={`By request type · ${d.case_count.toLocaleString('en-IN')} requests`} list={d.by_type} keyLabel="Request type" labelFn={k => TYPE_LABEL[k] || k} />
+          <SummaryTable title={`By type · ${d.case_count.toLocaleString('en-IN')} bills`} list={d.by_type} keyLabel="Type" labelFn={k => TYPE_LABEL[k] || k} />
           <SummaryTable title={`By employee · ${d.by_employee.length}`} list={d.by_employee} keyLabel="Employee" />
 
           <div style={{ ...card, overflow: 'hidden' }}>
             <div style={{ padding: '10px 14px', fontSize: 12, fontWeight: 700, color: t.text2, borderBottom: `1px solid ${t.border}` }}>
-              Requests, slowest first {d.case_count > d.cases.length ? `· top ${d.cases.length} of ${d.case_count.toLocaleString('en-IN')} (all in CSV)` : ''}
+              Bills, slowest first {d.case_count > d.cases.length ? `· top ${d.cases.length} of ${d.case_count.toLocaleString('en-IN')} (all in CSV)` : ''}
             </div>
             <div style={{ overflowX: 'auto', maxHeight: 560, overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead><tr>
-                  {['Request', 'App ID', 'Txn type', 'Branch', 'Employee', 'Landed', 'Actioned', 'In queue', 'View bill', 'First click', 'Bank confirm', 'UTR', 'Screenshot'].map((h, i) =>
+                  {['Type', 'App ID', 'Txn type', 'Branch', 'Employee', 'Landed', 'Actioned', 'In queue', 'Bank confirm', 'UTR', 'Screenshot'].map((h, i) =>
                     <th key={h} style={{ ...th, textAlign: i < 7 ? 'left' : 'right', position: 'sticky', top: 0, background: t.card }}>{h}</th>)}
                 </tr></thead>
                 <tbody>
@@ -173,7 +172,6 @@ export default function FinancePerformance() {
                       <td style={{ ...td, textAlign: 'left' }}>{c.landed_ist ? c.landed_ist.slice(5, 16) : '—'}</td>
                       <td style={{ ...td, textAlign: 'left' }}>{c.actioned_ist ? c.actioned_ist.slice(5, 16) : '—'}</td>
                       <td style={{ ...td, fontWeight: 700, color: c.wait_min > 20 ? t.red : c.wait_min > 10 ? (t.orange || t.gold) : t.text1 }}>{fmtMin(c.wait_min)}</td>
-                      <td style={td}>{fmtMin(c.view_bill_min)}</td><td style={td}>{fmtMin(c.first_click_min)}</td>
                       <td style={td}>{fmtMin(c.bank_min)}</td>
                       <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }}>{c.utr || '—'}</td>
                       <td style={td}>{c.screenshots ? '✓' : '—'}</td>
