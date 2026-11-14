@@ -113,7 +113,7 @@ export default function FinancePerformance() {
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: '1.4rem', fontWeight: 300, color: t.text1 }}>Finance Performance</div>
           <div style={{ fontSize: 11.5, color: t.text3, marginTop: 4, maxWidth: 760, lineHeight: 1.5 }}>
-            Time from when a payment request lands in the queue to when it&apos;s actioned — penny drop (requested → completed), final payment (penny drop done → payout), release (agreement signed → paid) and manual payment (penny drop done → recorded). Bill-view and first-click times will appear once the CRM logs them.
+            Finance employees only. Time from when a payment request lands in the queue to when it&apos;s actioned — final payment (penny drop done → payout) and release (agreement signed → paid) measure the finance employee. Penny drop (Razorpay check: API request sent → approved) and manual payment are shown as processing time, not attributed to branch staff. Bill-view and first-click times appear once the CRM logs them.
           </div>
         </div>
         <button onClick={downloadCsv} disabled={!d?.case_count}
