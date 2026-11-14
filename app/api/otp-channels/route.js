@@ -1,4 +1,4 @@
-// GET /api/otp-channels?from=YYYY-MM-DD&to=YYYY-MM-DD
+// GET /api/otp-channels?from=YYYY-MM-DD&to=YYYY-MM-DD[&filter_type=region|state|cluster|branch&filter_value=X]
 // Telesales (TS) vs Direct Walk-in (DW) OTP generation from the CRM, with
 // walk-in / purchase conversion, by region, branch and day. Region-scoped
 // users only get their regions. Data starts 1 Oct 2026. See lib/otpChannels.js.
@@ -6,7 +6,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { requireAuth } from '../../../lib/apiAuth'
 import { getAllowedRegionsForAuth } from '../../../lib/regionScope'
-import { buildOtpChannelReport, OTP_DATA_START } from '../../../lib/otpChannels'
+import { buildOtpChannelReport, OTP_DATA_START, OTP_FILTER_TYPES } from '../../../lib/otpChannels'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -32,12 +32,15 @@ export async function GET(req) {
   if (to > today) to = today
   if (to < from) return Response.json({ error: `No data before ${OTP_DATA_START}.` }, { status: 400 })
 
+  const fType = searchParams.get('filter_type'), fValue = searchParams.get('filter_value')
+  const filter = OTP_FILTER_TYPES.includes(fType) && fValue ? { type: fType, value: fValue } : null
+
   const allowedRegions = await getAllowedRegionsForAuth(supabase, auth)
-  const key = `${from}|${to}|${(allowedRegions || ['ALL']).slice().sort().join(',')}`
+  const key = `${from}|${to}|${filter ? filter.type + ':' + filter.value : ''}|${(allowedRegions || ['ALL']).slice().sort().join(',')}`
   const hit = cache.get(key)
   if (hit && Date.now() - hit.at < CACHE_MS) return Response.json({ ...hit.data, cached: true })
   try {
-    const data = await buildOtpChannelReport({ from, to, allowedRegions })
+    const data = await buildOtpChannelReport({ from, to, allowedRegions, filter })
     cache.set(key, { at: Date.now(), data })
     if (cache.size > 60) cache.delete(cache.keys().next().value)
     return Response.json(data)

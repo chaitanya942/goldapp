@@ -2,8 +2,9 @@
 
 // Dashboard section: Telesales (TS) vs Direct Walk-in (DW), from CRM OTP
 // generation — OTPs issued per channel, how many walked in, how many became
-// purchases, by region / branch / day. Same period filters as the dashboard;
-// data from 1 Oct 2026. Data: /api/otp-channels (lib/otpChannels.js).
+// purchases, by region / branch / day. Follows the dashboard's period and
+// location (region / state / cluster / branch) filter, and the CSV download
+// carries the same filters. Data from 1 Oct 2026. Data: /api/otp-channels (lib/otpChannels.js).
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { authedFetch } from '../../lib/authedFetch'
@@ -44,9 +45,14 @@ const fmtPct = (p) => (p == null ? '—' : `${(p * 100).toFixed(p >= 0.995 ? 0 :
 const fmtCr  = (v) => (!v ? '₹0' : v >= 1e7 ? `₹${(v / 1e7).toFixed(2)} Cr` : `₹${(v / 1e5).toFixed(1)} L`)
 const fmtDay = (d) => { const [, m, dd] = d.split('-'); return `${dd}/${m}` }
 
-export default function OtpChannelsSection({ t, isMobile }) {
+const FILTER_LABEL = { region: 'Region', state: 'State', cluster: 'Cluster', branch: 'Branch' }
+
+export default function OtpChannelsSection({ t, isMobile, period: dashPeriod = null, filterType = null, filterValue = null }) {
   const [open, setOpen] = useState(true)
-  const [period, setPeriod] = useState('mtd')
+  const [period, setPeriod] = useState(dashPeriod || 'mtd')
+  // The dashboard's period picker drives this section; its own pills (incl. Custom) can still override.
+  useEffect(() => { if (dashPeriod) setPeriod(dashPeriod) }, [dashPeriod])
+  const loc = filterType && filterValue ? { type: filterType, value: filterValue } : null
   const [custom, setCustom] = useState(() => { const t2 = istStr(istNow()); return { from: `${t2.slice(0, 7)}-01`, to: t2 } })
   const [state, setState] = useState({ loading: true, data: null, error: null })
   const [showAll, setShowAll] = useState(false)
@@ -57,12 +63,12 @@ export default function OtpChannelsSection({ t, isMobile }) {
     if (!from) { setState({ loading: false, data: null, error: null }); return }
     setState(s => ({ ...s, loading: true }))
     try {
-      const res = await authedFetch(`/api/otp-channels?from=${from}&to=${to}`)
+      const res = await authedFetch(`/api/otp-channels?from=${from}&to=${to}${loc ? `&filter_type=${loc.type}&filter_value=${encodeURIComponent(loc.value)}` : ''}`)
       const json = await res.json().catch(() => null)
       if (!res.ok || !json) throw new Error(json?.error || `Server error (HTTP ${res.status})`)
       setState({ loading: false, data: json, error: null })
     } catch (e) { setState(s => ({ loading: false, data: s.data, error: e.message })) }
-  }, [from, to])
+  }, [from, to, loc?.type, loc?.value]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (open) load() }, [open, load])
 
   const d = state.data
@@ -107,7 +113,8 @@ export default function OtpChannelsSection({ t, isMobile }) {
     const chCols = (x = {}) => [x.otps || 0, x.walked_in || 0, pct(rate(x.walked_in, x.otps)), x.purchased || 0, pct(rate(x.purchased, x.walked_in)), inr(x.purchase_value)]
     const chHead = (p) => [`${p} OTPs`, `${p} Walked In`, `${p} Walk-in Rate %`, `${p} Purchased`, `${p} Purchase Rate %`, `${p} Purchase Value (INR)`]
     const aoa = [
-      ['Telesales vs Direct Walk-in (CRM OTP)'], ['Period', d.from, 'to', d.to], [],
+      ['Telesales vs Direct Walk-in (CRM OTP)'], ['Period', PERIODS.find(p => p.key === period)?.label || period, d.from, 'to', d.to],
+      ['Filter', d.filter ? `${FILTER_LABEL[d.filter.type]}: ${d.filter.value}` : 'All Data'], [],
       ['Channel', 'Prefix', 'OTPs', 'Walked In', 'Walk-in Rate %', 'Purchased', 'Purchase Rate %', 'Purchase Value (INR)'],
       ['Telesales', 'TS', ...chCols(d.totals?.TS)],
       ['Direct Walk-in', 'DW', ...chCols(d.totals?.DW)],
@@ -124,7 +131,7 @@ export default function OtpChannelsSection({ t, isMobile }) {
     const blob = new Blob([toCsv(aoa)], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = url; a.download = `telesales-vs-direct-walkin_${d.from}_to_${d.to}.csv`
+    a.href = url; a.download = `telesales-vs-direct-walkin${d.filter ? '_' + String(d.filter.value).replace(/[^A-Za-z0-9]+/g, '-') : ''}_${d.from}_to_${d.to}.csv`
     document.body.appendChild(a); a.click(); a.remove()
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
@@ -160,6 +167,7 @@ export default function OtpChannelsSection({ t, isMobile }) {
             ) : (
               <span style={{ fontSize: 11.5, color: t.text3, marginLeft: 6, whiteSpace: 'nowrap' }}>{from ? (from === to ? from : `${from} → ${to}`) : 'No data before 1 Oct 2026'}</span>
             )}
+            {loc && <span style={{ fontSize: 11.5, color: t.gold, marginLeft: 6, whiteSpace: 'nowrap', flexShrink: 0 }}>· {FILTER_LABEL[loc.type]}: {loc.value}</span>}
             {d && <button onClick={downloadCsv} title="Download this period as CSV" style={{ ...pill(false), marginLeft: 'auto', color: t.gold, borderColor: `${t.gold}60` }}>↓ CSV</button>}
           </div>
 

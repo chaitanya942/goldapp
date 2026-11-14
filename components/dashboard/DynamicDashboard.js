@@ -179,7 +179,7 @@ const EmptyPanel = ({ t }) => (
 )
 
 // ══ PURCHASE INLINE (replaces section + accordion — always open, no title) ═══
-function PurchaseInline({ t, setActiveNav, canSee }) {
+function PurchaseInline({ t, setActiveNav, canSee, onFiltersChange }) {
   const canSeeLive    = canSee('purchase-live')
   const canSeeData    = canSee('purchase-data')
   const canSeeReports = canSee('purchase-reports')
@@ -214,6 +214,8 @@ function PurchaseInline({ t, setActiveNav, canSee }) {
   const [filterValue,     setFilterValue]     = useState(null)
   const [branchSearch,    setBranchSearch]    = useState('')
   const [branchDropOpen,  setBranchDropOpen]  = useState(false)
+  // Share period + location filter with the dashboard (the OTP section follows them).
+  useEffect(() => { onFiltersChange?.({ period, filterType, filterValue }) }, [period, filterType, filterValue]) // eslint-disable-line react-hooks/exhaustive-deps
   const [lastRefresh,     setLastRefresh]     = useState(null)
   const [lastSyncAt,      setLastSyncAt]      = useState(null)
 
@@ -1114,6 +1116,7 @@ export default function DynamicDashboard() {
   const isMobile = useMobile()
   const [heroVis, setHeroVis] = useState(false)
   useEffect(() => { setTimeout(()=>setHeroVis(true), 40) }, [])
+  const [dashFilters, setDashFilters] = useState({ period: null, filterType: null, filterValue: null })
 
   const name = userProfile?.full_name?.split(' ')[0] || 'there'
 
@@ -1201,13 +1204,13 @@ export default function DynamicDashboard() {
       {/* ── Purchase ── */}
       {hasPurchase && (
         <CollapsibleSection icon="◉" label="Purchases" color={t.gold} t={t} expanded={sectionOpen.purchase} onToggle={() => toggleSection('purchase')}>
-          <PurchaseInline t={t} setActiveNav={setActiveNav} canSee={canSee} />
+          <PurchaseInline t={t} setActiveNav={setActiveNav} canSee={canSee} onFiltersChange={setDashFilters} />
         </CollapsibleSection>
       )}
 
       {/* ── Jarvis · store footfall ── */}
       {/* ── Telesales vs Direct Walk-in (CRM OTP generation) — same audience as the live walk-in tiles ── */}
-      {canSee('tab.purchase-data.live') && <OtpChannelsSection t={t} isMobile={isMobile} />}
+      {canSee('tab.purchase-data.live') && <OtpChannelsSection t={t} isMobile={isMobile} period={dashFilters.period} filterType={dashFilters.filterType} filterValue={dashFilters.filterValue} />}
 
       {canSeeJarvis(userProfile?.role, userProfile?.email) && <JarvisFootfallSection t={t} isMobile={isMobile} />}
 

@@ -1941,7 +1941,7 @@ export default function DashboardHome() {
       </div>}
 
       {/* ── Telesales vs Direct Walk-in (CRM OTP generation) ── */}
-      <OtpChannelsSection t={t} isMobile={isMobile} />
+      <OtpChannelsSection t={t} isMobile={isMobile} period={period} filterType={filterType} filterValue={filterValue} />
 
       {/* ── JARVIS · STORE FOOTFALL (collapsible) ── */}
       {canSeeJarvis(userProfile?.role, userProfile?.email) && <JarvisFootfallSection t={t} isMobile={isMobile} />}
