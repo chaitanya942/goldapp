@@ -8,6 +8,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { authedFetch } from '../../lib/authedFetch'
 import { istNow, istStr, istLastWeekRange } from '../../lib/dateIst'
+import { toCsv } from '../../lib/billedVsPaidFormat'
 
 const DATA_START = '2026-10-01'
 const PERIODS = [
@@ -97,6 +98,37 @@ export default function OtpChannelsSection({ t, isMobile }) {
 
   const maxDay = Math.max(1, ...(d?.days || []).map(x => Math.max(x.TS, x.DW)))
 
+  // Plain CSV of everything loaded for the period: summary, regions, branches, daily OTPs.
+  const downloadCsv = () => {
+    if (!d) return
+    const pct = (p) => (p == null ? '' : (p * 100).toFixed(1))
+    const inr = (v) => Math.round(Number(v) || 0)
+    const rate = (a, b) => (b ? a / b : null)
+    const chCols = (x = {}) => [x.otps || 0, x.walked_in || 0, pct(rate(x.walked_in, x.otps)), x.purchased || 0, pct(rate(x.purchased, x.walked_in)), inr(x.purchase_value)]
+    const chHead = (p) => [`${p} OTPs`, `${p} Walked In`, `${p} Walk-in Rate %`, `${p} Purchased`, `${p} Purchase Rate %`, `${p} Purchase Value (INR)`]
+    const aoa = [
+      ['Telesales vs Direct Walk-in (CRM OTP)'], ['Period', d.from, 'to', d.to], [],
+      ['Channel', 'Prefix', 'OTPs', 'Walked In', 'Walk-in Rate %', 'Purchased', 'Purchase Rate %', 'Purchase Value (INR)'],
+      ['Telesales', 'TS', ...chCols(d.totals?.TS)],
+      ['Direct Walk-in', 'DW', ...chCols(d.totals?.DW)],
+      [],
+      ['By Region'], ['Region', ...chHead('TS'), ...chHead('DW')],
+      ...(d.regions || []).map(r => [r.region, ...chCols(r.TS), ...chCols(r.DW)]),
+      [],
+      ['By Branch'], ['Branch', 'Region', ...chHead('TS'), ...chHead('DW')],
+      ...(d.branches || []).map(b => [b.branch, b.region, ...chCols(b.TS), ...chCols(b.DW)]),
+      [],
+      ['Daily OTPs'], ['Date', 'TS OTPs', 'DW OTPs'],
+      ...(d.days || []).map(x => [x.date, x.TS || 0, x.DW || 0]),
+    ].map(row => row.map(v => (typeof v === 'string' ? v.replace(/[^\x20-\x7E]/g, ' ').replace(/\s+/g, ' ').trim() : v)))
+    const blob = new Blob([toCsv(aoa)], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `telesales-vs-direct-walkin_${d.from}_to_${d.to}.csv`
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
   return (
     <div style={{ marginTop: 14, border: `1px solid ${t.border2 || t.border}`, borderRadius: 20, background: `linear-gradient(160deg,${t.card2},${t.card3 || t.card2})`, boxShadow: t.shadow, overflow: 'hidden' }}>
       <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: isMobile ? '14px 16px' : '16px 24px', cursor: 'pointer', userSelect: 'none', borderBottom: open ? `1px solid ${t.border}` : 'none' }}>
@@ -128,6 +160,7 @@ export default function OtpChannelsSection({ t, isMobile }) {
             ) : (
               <span style={{ fontSize: 11.5, color: t.text3, marginLeft: 6, whiteSpace: 'nowrap' }}>{from ? (from === to ? from : `${from} → ${to}`) : 'No data before 1 Oct 2026'}</span>
             )}
+            {d && <button onClick={downloadCsv} title="Download this period as CSV" style={{ ...pill(false), marginLeft: 'auto', color: t.gold, borderColor: `${t.gold}60` }}>↓ CSV</button>}
           </div>
 
           {state.error && !d && <div style={{ fontSize: 13, color: t.red }}>Couldn&apos;t load: {state.error}</div>}
