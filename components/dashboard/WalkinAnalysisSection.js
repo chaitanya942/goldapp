@@ -12,6 +12,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { authedFetch } from '../../lib/authedFetch'
 import { istNow, istStr, istLastWeekRange } from '../../lib/dateIst'
+import WalkinSankey from './WalkinSankey'
 
 const DATA_START = '2026-10-01'
 const PERIODS = [
@@ -183,6 +184,8 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
                   No walk-in activity for {from === to ? from : `${from} → ${to}`} (Sundays excluded) — branches may have been closed. Pick another day above.
                 </div>
               ) : (
+                <>
+                <WalkinSankey t={t} isMobile={isMobile} jarvis={jarvis} cells={view.flatMap(r => r.branches)} />
                 <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden' }}>
                   <div style={{ overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -218,6 +221,7 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
                     </table>
                   </div>
                 </div>
+                </>
               )}
             </div>
           )}
