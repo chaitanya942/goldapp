@@ -22,6 +22,12 @@ const PERIODS = [
 const FILTER_LABEL = { region: 'Region', state: 'State', cluster: 'Cluster', branch: 'Branch' }
 const KEYS = ['jarvis_group', 'jarvis_unique', 'otp_TS', 'otp_DW', 'walk_TS', 'walk_DW']
 
+// Last working day: yesterday, or Saturday when yesterday was a Sunday (branches closed).
+function lastWorkingDay(now = istNow()) {
+  const y = new Date(now - 86400000)
+  return istStr(y.getUTCDay() === 0 ? new Date(now - 2 * 86400000) : y)
+}
+
 // Ranges never start before 1 Oct 2026 and never end after yesterday (Jarvis).
 function rangeFor(key, custom) {
   const now = istNow(), y = now.getUTCFullYear(), m = now.getUTCMonth()
@@ -33,7 +39,7 @@ function rangeFor(key, custom) {
   else if (key === 'last_week') r = istLastWeekRange()
   else if (key === 'mtd') r = { from: `${y}-${pad(m + 1)}-01`, to: yday }
   else if (key === 'custom') { const to = custom?.to && custom.to <= yday ? custom.to : yday; r = { from: custom?.from && custom.from <= to ? custom.from : to, to } }
-  else r = { from: yday, to: yday }
+  else { const w = lastWorkingDay(now); r = { from: w, to: w } }
   if (r.from < DATA_START) r = { ...r, from: DATA_START }
   if (r.to > yday) r = { ...r, to: yday }
   return r.to < DATA_START ? { from: null, to: null } : r
@@ -47,7 +53,7 @@ const sumCells = (list) => { const o = Object.fromEntries(KEYS.map(k => [k, 0]))
 export default function WalkinAnalysisSection({ t, isMobile, filterType = null, filterValue = null }) {
   const [open, setOpen] = useState(true)
   const [period, setPeriod] = useState('yesterday')
-  const [custom, setCustom] = useState(() => { const yday = istStr(new Date(istNow() - 86400000)); return { from: yday, to: yday } })
+  const [custom, setCustom] = useState(() => { const w = lastWorkingDay(); return { from: w, to: w } })
   const [state, setState] = useState({ loading: true, data: null, error: null })
   const [regionSel, setRegionSel] = useState(null)
   const [branchSel, setBranchSel] = useState(null)
@@ -130,7 +136,7 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
         <div style={{ width: 3, height: 20, borderRadius: 2, background: `linear-gradient(180deg,${t.blue},${t.gold})`, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: isMobile ? 12.5 : 14, color: t.text2, letterSpacing: isMobile ? '.08em' : '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Walk-in Analysis</div>
-          {open && <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>Jarvis walk-in → OTP (Telesales / Direct) → Actual walk-ins, by region &amp; branch · Sundays excluded · defaults to yesterday</div>}
+          {open && <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>Jarvis walk-in → OTP (Telesales / Direct) → Actual walk-ins, by region &amp; branch · Sundays excluded · defaults to yesterday (Saturday if yesterday was Sunday)</div>}
         </div>
         <div style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, background: `${t.gold}12`, border: `1px solid ${t.gold}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.gold, fontSize: 11, transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .3s' }}>▼</div>
       </div>
