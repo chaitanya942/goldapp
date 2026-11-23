@@ -20,6 +20,7 @@ const inkFor = (hex) => {
 }
 const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3)
 const fmtN = (n) => Math.round(n).toLocaleString('en-IN')
+const fmtP = (p) => (p > 0 && p < 0.005 ? '<1%' : `${Math.round(p * 100)}%`)
 
 function buildGraph(cells, jarvis) {
   const sum = (f) => cells.reduce((s, c) => s + (f(c) || 0), 0)
@@ -224,8 +225,8 @@ export default function WalkinSankey({ t, isMobile, cells, jarvis }) {
             const key = `node:${n.id}`
             return (
               <g key={n.id} style={{ opacity: cp, transform: `translate(${cx}px,${cy}px) scale(${0.6 + 0.4 * cp},${cp}) translate(${-cx}px,${-cy}px)`, cursor: 'pointer' }}
-                onMouseMove={e => showTip(e, key, `${n.label}: ${fmtN(n.value)}${pc != null ? ` (${Math.round(pc * 100)}%)` : ''}`)}
-                onClick={e => showTip(e, key, `${n.label}: ${fmtN(n.value)}${pc != null ? ` (${Math.round(pc * 100)}%)` : ''}`)}>
+                onMouseMove={e => showTip(e, key, `${n.label}: ${fmtN(n.value)}${pc != null ? ` (${fmtP(pc)})` : ''}`)}
+                onClick={e => showTip(e, key, `${n.label}: ${fmtN(n.value)}${pc != null ? ` (${fmtP(pc)})` : ''}`)}>
                 <rect x={ps.x} y={ps.y} width={ps.w} height={ps.h} rx="7"
                   fill={n.kind === 'ext' ? 'transparent' : `url(#ng${uid}${n.kind})`}
                   stroke={n.kind === 'ext' ? (t.text4 || '#888') : 'rgba(255,255,255,.08)'} strokeDasharray={n.kind === 'ext' ? '4 3' : undefined}
@@ -234,7 +235,7 @@ export default function WalkinSankey({ t, isMobile, cells, jarvis }) {
                   <>
                     <text x={cx} y={cy - (isMobile ? 4 : 5)} textAnchor="middle" fontSize={fs1} fontWeight="600" fill={n.kind === 'ext' ? (t.text3 || '#777') : ink} style={{ opacity: 0.92 }}>{label(n)}</text>
                     <text x={cx} y={cy + (isMobile ? 11 : 14)} textAnchor="middle" fontSize={fs2} fontWeight="800" fill={n.kind === 'ext' ? (t.text2 || '#555') : ink} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                      {fmtN(n.value * ease(p / 0.85))}{pc != null && !isMobile ? <tspan fontSize={fs1} fontWeight="600" dx="4" style={{ opacity: 0.85 }}>{Math.round(pc * 100)}%</tspan> : null}
+                      {fmtN(n.value * ease(p / 0.85))}{pc != null && !isMobile ? <tspan fontSize={fs1} fontWeight="600" dx="4" style={{ opacity: 0.85 }}>{fmtP(pc)}</tspan> : null}
                     </text>
                   </>
                 ) : (

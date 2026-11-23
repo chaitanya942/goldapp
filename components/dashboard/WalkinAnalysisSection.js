@@ -43,7 +43,9 @@ function rangeFor(key, custom) {
   else { const w = lastWorkingDay(now); r = { from: w, to: w } }
   if (r.from < DATA_START) r = { ...r, from: DATA_START }
   if (r.to > yday) r = { ...r, to: yday }
-  return r.to < DATA_START ? { from: null, to: null } : r
+  if (r.to < DATA_START) return { from: null, to: null }
+  if (r.from > r.to) return { from: null, to: null, none: true }
+  return r
 }
 
 const fmtN = (n) => (n == null ? '—' : Number(n).toLocaleString('en-IN'))
@@ -60,7 +62,7 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
   const [branchSel, setBranchSel] = useState(null)
   const [expanded, setExpanded] = useState(() => new Set())   // regions in here are open; all closed by default
   const loc = filterType && filterValue ? { type: filterType, value: filterValue } : null
-  const { from, to } = rangeFor(period, custom)
+  const { from, to, none } = rangeFor(period, custom)
   const yday = istStr(new Date(istNow() - 86400000))
 
   const load = useCallback(async () => {
@@ -71,7 +73,7 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
       const json = await res.json().catch(() => null)
       if (!res.ok || !json) throw new Error(json?.error || `Server error (HTTP ${res.status})`)
       setState({ loading: false, data: json, error: null })
-    } catch (e) { setState(s => ({ loading: false, data: s.data, error: e.message })) }
+    } catch (e) { setState({ loading: false, data: null, error: e.message }) }
   }, [from, to, loc?.type, loc?.value]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (open) load() }, [open, load])
 
@@ -157,7 +159,7 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
                 ))}
               </span>
             ) : (
-              <span style={{ fontSize: 11.5, color: t.text3, marginLeft: isMobile ? 0 : 6, whiteSpace: 'nowrap', flexBasis: isMobile ? '100%' : 'auto' }}>{from ? (from === to ? from : `${from} → ${to}`) : 'No data before 1 Oct 2026'}</span>
+              <span style={{ fontSize: 11.5, color: t.text3, marginLeft: isMobile ? 0 : 6, whiteSpace: 'nowrap', flexBasis: isMobile ? '100%' : 'auto' }}>{from ? (from === to ? from : `${from} → ${to}`) : none ? 'No completed day in this period yet' : 'No data before 1 Oct 2026'}</span>
             )}
             {loc && <span style={{ fontSize: 11.5, color: t.gold, marginLeft: isMobile ? 0 : 6, whiteSpace: 'nowrap' }}>· {FILTER_LABEL[loc.type]}: {loc.value}</span>}
           </div>
