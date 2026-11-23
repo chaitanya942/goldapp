@@ -108,7 +108,7 @@ export async function GET(req) {
       jarvisAvailable = !tableMissing
       for (const r of rows) {
         if (r.footfall == null || isSunday(r.date)) continue
-        const c = bcell(r.branch, r.region)
+        const c = bcell(r.branch, r.region || otp.regionFallback?.(r.branch))
         c.jarvis_group += Number(r.group) || 0
         c.jarvis_unique += Number(r.footfall) || 0
       }
@@ -118,7 +118,11 @@ export async function GET(req) {
     const KEYS = ['jarvis_group', 'jarvis_unique', 'otp_TS', 'otp_DW', 'walk_TS', 'walk_DW']
     const regionMap = new Map()
     const total = { jarvis_group: 0, jarvis_unique: 0, otp_TS: 0, otp_DW: 0, walk_TS: 0, walk_DW: 0 }
+    // Rows that still have no region (no branch anywhere in the CRM for that
+    // OTP) can't be placed; they're reported as a count, not as a fake region.
+    const unplaced = { otp_TS: 0, otp_DW: 0, walk_TS: 0, walk_DW: 0, jarvis_group: 0 }
     for (const c of branchMap.values()) {
+      if (c.region === 'Unassigned') { for (const k of Object.keys(unplaced)) unplaced[k] += c[k] || 0; continue }
       const r = regionMap.get(c.region) || regionMap.set(c.region, { region: c.region, jarvis_group: 0, jarvis_unique: 0, otp_TS: 0, otp_DW: 0, walk_TS: 0, walk_DW: 0, branches: [] }).get(c.region)
       for (const k of KEYS) { r[k] += c[k]; total[k] += c[k] }
       r.branches.push(c)
@@ -127,7 +131,7 @@ export async function GET(req) {
     const regions = [...regionMap.values()].sort((a, b) => activity(b) - activity(a))
     for (const r of regions) r.branches.sort((a, b) => activity(b) - activity(a))
 
-    const data = { from, to, filter, jarvisAvailable, regions, total, no_otp: otp.no_otp?.walked_in || 0 }
+    const data = { from, to, filter, jarvisAvailable, regions, total, unplaced, no_otp: otp.no_otp?.walked_in || 0 }
     cache.set(key, { data, ts: Date.now() })
     if (cache.size > 60) cache.delete(cache.keys().next().value)
     return Response.json(data)

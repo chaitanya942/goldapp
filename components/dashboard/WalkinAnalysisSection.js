@@ -57,7 +57,7 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
   const [state, setState] = useState({ loading: true, data: null, error: null })
   const [regionSel, setRegionSel] = useState(null)
   const [branchSel, setBranchSel] = useState(null)
-  const [collapsed, setCollapsed] = useState(() => new Set())   // regions in here are collapsed; default all expanded
+  const [expanded, setExpanded] = useState(() => new Set())   // regions in here are open; all closed by default
   const loc = filterType && filterValue ? { type: filterType, value: filterValue } : null
   const { from, to } = rangeFor(period, custom)
   const yday = istStr(new Date(istNow() - 86400000))
@@ -208,10 +208,10 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
                           {dataCells(grand)}
                         </tr>
                         {view.map(r => {
-                          const show = !collapsed.has(r.region)
+                          const show = expanded.has(r.region)
                           return (
                             <RegionGroup key={r.region} r={r} show={show}
-                              toggle={() => setCollapsed(s => { const n = new Set(s); n.has(r.region) ? n.delete(r.region) : n.add(r.region); return n })}
+                              toggle={() => setExpanded(s => { const n = new Set(s); n.has(r.region) ? n.delete(r.region) : n.add(r.region); return n })}
                               t={t} td={td} dataCells={dataCells} />
                           )
                         })}
@@ -219,7 +219,8 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
                     </table>
                   </div>
                   <div style={{ padding: '9px 14px', borderTop: `1px solid ${t.border}`, fontSize: 11.5, color: t.text3, display: 'flex', flexWrap: 'wrap', gap: 14 }}>
-                    <span>% under OTP = of Jarvis footfall · % under Actual walk-ins = of that channel&apos;s OTPs{jarvis ? ' · % under Jarvis = footfall that became a walk-in' : ''}. Click a region to collapse its branches.</span>
+                    <span>% under OTP = of Jarvis footfall · % under Actual walk-ins = of that channel&apos;s OTPs{jarvis ? ' · % under Jarvis = footfall that became a walk-in' : ''}. Click a region to see its branches.</span>
+                    {d.unplaced && (d.unplaced.otp_TS + d.unplaced.otp_DW + d.unplaced.walk_TS + d.unplaced.walk_DW) > 0 && <span style={{ color: t.text4 }}>· {fmtN(d.unplaced.otp_TS + d.unplaced.otp_DW)} OTPs had no branch anywhere in the CRM and aren&apos;t in any region</span>}
                     {d.no_otp > 0 && <span style={{ color: t.text4 }}>· {fmtN(d.no_otp)} actual walk-ins had no OTP (not in Telesales/Direct)</span>}
                     {!jarvis && <span style={{ color: t.text4 }}>· Jarvis footfall not available for your account</span>}
                   </div>
