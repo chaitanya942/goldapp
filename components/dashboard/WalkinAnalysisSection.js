@@ -143,10 +143,10 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
 
       {open && (
         <div style={{ padding: isMobile ? '14px' : '18px 24px 22px' }}>
-          <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', marginBottom: 10, alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10, alignItems: 'center' }}>
             {PERIODS.map(p => <button key={p.key} onClick={() => setPeriod(p.key)} style={pill(period === p.key)}>{p.label}</button>)}
             {period === 'custom' ? (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 6, flexShrink: 0 }}>
+              <span style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginLeft: isMobile ? 0 : 6 }}>
                 {['from', 'to'].map((k, i) => (
                   <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                     {i === 1 && <span style={{ fontSize: 11.5, color: t.text3 }}>→</span>}
@@ -157,17 +157,17 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
                 ))}
               </span>
             ) : (
-              <span style={{ fontSize: 11.5, color: t.text3, marginLeft: 6, whiteSpace: 'nowrap' }}>{from ? (from === to ? from : `${from} → ${to}`) : 'No data before 1 Oct 2026'}</span>
+              <span style={{ fontSize: 11.5, color: t.text3, marginLeft: isMobile ? 0 : 6, whiteSpace: 'nowrap', flexBasis: isMobile ? '100%' : 'auto' }}>{from ? (from === to ? from : `${from} → ${to}`) : 'No data before 1 Oct 2026'}</span>
             )}
-            {loc && <span style={{ fontSize: 11.5, color: t.gold, marginLeft: 6, whiteSpace: 'nowrap', flexShrink: 0 }}>· {FILTER_LABEL[loc.type]}: {loc.value}</span>}
+            {loc && <span style={{ fontSize: 11.5, color: t.gold, marginLeft: isMobile ? 0 : 6, whiteSpace: 'nowrap' }}>· {FILTER_LABEL[loc.type]}: {loc.value}</span>}
           </div>
 
           {/* Section region + branch filters */}
           {d && (
-            <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', marginBottom: 14, alignItems: 'center' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14, alignItems: 'center' }}>
               <button onClick={() => { setRegionSel(null); setBranchSel(null) }} style={pill(!regionSel)}>All regions</button>
               {d.regions.map(r => <button key={r.region} onClick={() => { setRegionSel(r.region); setBranchSel(null) }} style={pill(regionSel === r.region)}>{r.region}</button>)}
-              <select value={branchSel || ''} onChange={e => setBranchSel(e.target.value || null)} style={{ marginLeft: 6, background: t.card, color: t.text2, border: `1px solid ${t.border}`, borderRadius: 8, padding: '5px 8px', fontSize: 12, flexShrink: 0 }}>
+              <select value={branchSel || ''} onChange={e => setBranchSel(e.target.value || null)} style={{ marginLeft: isMobile ? 0 : 6, width: isMobile ? '100%' : 'auto', maxWidth: '100%', background: t.card, color: t.text2, border: `1px solid ${t.border}`, borderRadius: 8, padding: isMobile ? '8px 10px' : '5px 8px', fontSize: isMobile ? 13 : 12 }}>
                 <option value="">All branches</option>
                 {allBranches.map(b => <option key={b} value={b}>{b}</option>)}
               </select>
@@ -218,12 +218,13 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
                       </tbody>
                     </table>
                   </div>
+                  {((d.unplaced && (d.unplaced.otp_TS + d.unplaced.otp_DW + d.unplaced.walk_TS + d.unplaced.walk_DW) > 0) || d.no_otp > 0 || !jarvis) && (
                   <div style={{ padding: '9px 14px', borderTop: `1px solid ${t.border}`, fontSize: 11.5, color: t.text3, display: 'flex', flexWrap: 'wrap', gap: 14 }}>
-                    <span>% under OTP = of Jarvis footfall · % under Actual walk-ins = of that channel&apos;s OTPs{jarvis ? ' · % under Jarvis = footfall that became a walk-in' : ''}. Click a region to see its branches.</span>
                     {d.unplaced && (d.unplaced.otp_TS + d.unplaced.otp_DW + d.unplaced.walk_TS + d.unplaced.walk_DW) > 0 && <span style={{ color: t.text4 }}>· {fmtN(d.unplaced.otp_TS + d.unplaced.otp_DW)} OTPs had no branch anywhere in the CRM and aren&apos;t in any region</span>}
                     {d.no_otp > 0 && <span style={{ color: t.text4 }}>· {fmtN(d.no_otp)} actual walk-ins had no OTP (not in Telesales/Direct)</span>}
                     {!jarvis && <span style={{ color: t.text4 }}>· Jarvis footfall not available for your account</span>}
                   </div>
+                  )}
                 </div>
               )}
             </div>
