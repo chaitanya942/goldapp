@@ -103,8 +103,8 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
     background: active ? `${t.gold}20` : 'transparent', color: active ? t.gold : t.text3,
     fontSize: 11.5, fontWeight: active ? 700 : 500, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
   })
-  const th = { padding: '8px 10px', textAlign: 'right', fontSize: 10.5, color: t.text3, textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap', background: t.card, position: 'sticky', top: 0 }
-  const td = { padding: '7px 10px', fontSize: 12.5, color: t.text2, borderBottom: `1px solid ${t.border}`, textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
+  const th = { padding: isMobile ? '6px 3px' : '8px 10px', textAlign: 'right', fontSize: isMobile ? 9 : 10.5, color: t.text3, textTransform: 'uppercase', letterSpacing: isMobile ? 0 : '.04em', fontWeight: 700, borderBottom: `1px solid ${t.border}`, whiteSpace: isMobile ? 'normal' : 'nowrap', background: t.card, position: 'sticky', top: 0 }
+  const td = { padding: isMobile ? '6px 3px' : '7px 10px', fontSize: isMobile ? 11.5 : 12.5, color: t.text2, borderBottom: `1px solid ${t.border}`, textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: isMobile ? 'normal' : 'nowrap', overflowWrap: 'break-word' }
   const ncols = 1 + (jarvis ? 1 : 0) + 4
 
   // Each cell: count on top, its % underneath. OTP % is of Jarvis footfall;
@@ -112,7 +112,7 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
   const numCell = (val, p, color) => (
     <td style={{ ...td, color }}>
       {fmtN(val)}
-      {p != null && <div style={{ fontSize: 10.5, color: t.text4, fontWeight: 400 }}>{fmtPctR(p)}</div>}
+      {p != null && <div style={{ fontSize: isMobile ? 9.5 : 10.5, color: t.text4, fontWeight: 400 }}>{fmtPctR(p)}</div>}
     </td>
   )
   const dataCells = (x) => {
@@ -120,8 +120,8 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
     return <>
       {jarvis && (
         <td style={{ ...td, color: t.blue }}>
-          {fmtN(x.jarvis_group)}{x.jarvis_unique ? <span style={{ color: t.text4, fontSize: 11, marginLeft: 4 }}>/ {fmtN(x.jarvis_unique)}</span> : null}
-          {f > 0 && <div style={{ fontSize: 10.5, color: t.text4, fontWeight: 400 }}>{fmtPctR(pct(x.walk_TS + x.walk_DW, f))} walk-in</div>}
+          {fmtN(x.jarvis_group)}{x.jarvis_unique && !isMobile ? <span style={{ color: t.text4, fontSize: 11, marginLeft: 4 }}>/ {fmtN(x.jarvis_unique)}</span> : null}
+          {f > 0 && <div style={{ fontSize: isMobile ? 9.5 : 10.5, color: t.text4, fontWeight: 400 }}>{fmtPctR(pct(x.walk_TS + x.walk_DW, f))}{isMobile ? '' : ' walk-in'}</div>}
         </td>
       )}
       {numCell(x.otp_TS, pct(x.otp_TS, f), C.TS)}
@@ -187,20 +187,27 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
                 <>
                 <WalkinSankey t={t} isMobile={isMobile} jarvis={jarvis} cells={view.flatMap(r => r.branches)} />
                 <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden' }}>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <div style={{ overflowX: isMobile ? 'visible' : 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: isMobile ? 'fixed' : 'auto' }}>
+                      {isMobile && (
+                        <colgroup>
+                          <col style={{ width: jarvis ? '33%' : '38%' }} />
+                          {jarvis && <col style={{ width: '13.4%' }} />}
+                          {[0, 1, 2, 3].map(i => <col key={i} style={{ width: jarvis ? '13.4%' : '15.5%' }} />)}
+                        </colgroup>
+                      )}
                       <thead>
                         <tr>
-                          <th rowSpan={2} style={{ ...th, textAlign: 'left' }}>Region / Branch</th>
-                          {jarvis && <th rowSpan={2} style={th}>Jarvis walk-in<div style={{ fontSize: 9, color: t.text4, fontWeight: 500 }}>group / unique</div></th>}
-                          <th colSpan={2} style={{ ...th, textAlign: 'center', borderLeft: `1px solid ${t.border}` }}>OTP generated</th>
-                          <th colSpan={2} style={{ ...th, textAlign: 'center', borderLeft: `1px solid ${t.border}` }}>Actual walk-ins</th>
+                          <th rowSpan={2} style={{ ...th, textAlign: 'left' }}>{isMobile ? 'Region' : 'Region / Branch'}</th>
+                          {jarvis && <th rowSpan={2} style={th}>{isMobile ? 'Jarvis' : <>Jarvis walk-in<div style={{ fontSize: 9, color: t.text4, fontWeight: 500 }}>group / unique</div></>}</th>}
+                          <th colSpan={2} style={{ ...th, textAlign: 'center', borderLeft: `1px solid ${t.border}` }}>{isMobile ? 'OTP' : 'OTP generated'}</th>
+                          <th colSpan={2} style={{ ...th, textAlign: 'center', borderLeft: `1px solid ${t.border}` }}>{isMobile ? 'Walk-ins' : 'Actual walk-ins'}</th>
                         </tr>
                         <tr>
-                          <th style={{ ...th, color: C.TS, borderLeft: `1px solid ${t.border}` }}>Telesales</th>
-                          <th style={{ ...th, color: C.DW }}>Direct</th>
-                          <th style={{ ...th, color: C.TS, borderLeft: `1px solid ${t.border}` }}>Telesales</th>
-                          <th style={{ ...th, color: C.DW }}>Direct</th>
+                          <th style={{ ...th, color: C.TS, borderLeft: `1px solid ${t.border}` }}>{isMobile ? 'TS' : 'Telesales'}</th>
+                          <th style={{ ...th, color: C.DW }}>{isMobile ? 'DW' : 'Direct'}</th>
+                          <th style={{ ...th, color: C.TS, borderLeft: `1px solid ${t.border}` }}>{isMobile ? 'TS' : 'Telesales'}</th>
+                          <th style={{ ...th, color: C.DW }}>{isMobile ? 'DW' : 'Direct'}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -214,7 +221,7 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
                           return (
                             <RegionGroup key={r.region} r={r} show={show}
                               toggle={() => setExpanded(s => { const n = new Set(s); n.has(r.region) ? n.delete(r.region) : n.add(r.region); return n })}
-                              t={t} td={td} dataCells={dataCells} />
+                              t={t} td={td} dataCells={dataCells} isMobile={isMobile} />
                           )
                         })}
                       </tbody>
@@ -231,19 +238,19 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
   )
 }
 
-function RegionGroup({ r, show, toggle, t, td, dataCells }) {
+function RegionGroup({ r, show, toggle, t, td, dataCells, isMobile }) {
   return (
     <>
       <tr onClick={toggle} style={{ cursor: 'pointer', background: t.card2 || t.card }}>
         <td style={{ ...td, textAlign: 'left', color: t.text1, fontWeight: 700 }}>
-          <span style={{ display: 'inline-block', width: 12, color: t.text3, fontSize: 10 }}>{show ? '▾' : '▸'}</span>
-          {r.region} <span style={{ color: t.text4, fontWeight: 400, fontSize: 11 }}>· {r.branches.length}</span>
+          <span style={{ display: 'inline-block', width: isMobile ? 10 : 12, color: t.text3, fontSize: 10 }}>{show ? '▾' : '▸'}</span>
+          {r.region}{!isMobile && <span style={{ color: t.text4, fontWeight: 400, fontSize: 11 }}> · {r.branches.length}</span>}
         </td>
         {dataCells(r)}
       </tr>
       {show && r.branches.map(b => (
         <tr key={b.branch}>
-          <td style={{ ...td, textAlign: 'left', color: t.text2, paddingLeft: 28 }}>{b.branch}</td>
+          <td style={{ ...td, textAlign: 'left', color: t.text2, paddingLeft: isMobile ? 10 : 28, fontSize: isMobile ? 10.5 : td.fontSize, letterSpacing: isMobile ? '-.01em' : undefined }}>{isMobile ? b.branch.replace(/^[A-Z]{2}-/, '') : b.branch}</td>
           {dataCells(b)}
         </tr>
       ))}
