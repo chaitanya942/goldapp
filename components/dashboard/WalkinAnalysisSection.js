@@ -1,7 +1,7 @@
 'use client'
 
 // Dashboard section: the walk-in journey funnel as one table —
-//   Jarvis walk-in  →  OTP generated (Telesales / Direct)  →  CRM walk-ins (Telesales / Direct)
+//   Jarvis walk-in  →  OTP generated (Telesales / Direct)  →  Actual walk-ins (Telesales / Direct)
 // as columns, with regions as rows and every branch nested under its region.
 // Sundays are excluded (branches closed). One shared date filter (defaults to
 // yesterday, because Jarvis camera counts are only complete through yesterday)
@@ -40,6 +40,8 @@ function rangeFor(key, custom) {
 }
 
 const fmtN = (n) => (n == null ? '—' : Number(n).toLocaleString('en-IN'))
+const fmtPctR = (p) => (p == null ? '' : `${Math.round(p * 100)}%`)
+const pct = (a, b) => (b > 0 ? a / b : null)
 const sumCells = (list) => { const o = Object.fromEntries(KEYS.map(k => [k, 0])); for (const x of list) for (const k of KEYS) o[k] += x[k] || 0; return o }
 
 export default function WalkinAnalysisSection({ t, isMobile, filterType = null, filterValue = null }) {
@@ -98,14 +100,29 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
   const td = { padding: '7px 10px', fontSize: 12.5, color: t.text2, borderBottom: `1px solid ${t.border}`, textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
   const ncols = 1 + (jarvis ? 1 : 0) + 4
 
-  const jcell = (x) => jarvis ? <td style={{ ...td, color: t.blue }}>{fmtN(x.jarvis_group)}{x.jarvis_unique ? <span style={{ color: t.text4, fontSize: 11, marginLeft: 4 }}>/ {fmtN(x.jarvis_unique)}</span> : null}</td> : null
-  const dataCells = (x) => <>
-    {jcell(x)}
-    <td style={{ ...td, color: C.TS }}>{fmtN(x.otp_TS)}</td>
-    <td style={{ ...td, color: C.DW }}>{fmtN(x.otp_DW)}</td>
-    <td style={{ ...td, color: C.TS }}>{fmtN(x.walk_TS)}</td>
-    <td style={{ ...td, color: C.DW }}>{fmtN(x.walk_DW)}</td>
-  </>
+  // Each cell: count on top, its % underneath. OTP % is of Jarvis footfall;
+  // actual-walk-in % is of that channel's OTPs (conversion).
+  const numCell = (val, p, color) => (
+    <td style={{ ...td, color }}>
+      {fmtN(val)}
+      {p != null && <div style={{ fontSize: 10.5, color: t.text4, fontWeight: 400 }}>{fmtPctR(p)}</div>}
+    </td>
+  )
+  const dataCells = (x) => {
+    const f = x.jarvis_group
+    return <>
+      {jarvis && (
+        <td style={{ ...td, color: t.blue }}>
+          {fmtN(x.jarvis_group)}{x.jarvis_unique ? <span style={{ color: t.text4, fontSize: 11, marginLeft: 4 }}>/ {fmtN(x.jarvis_unique)}</span> : null}
+          {f > 0 && <div style={{ fontSize: 10.5, color: t.text4, fontWeight: 400 }}>{fmtPctR(pct(x.walk_TS + x.walk_DW, f))} walk-in</div>}
+        </td>
+      )}
+      {numCell(x.otp_TS, pct(x.otp_TS, f), C.TS)}
+      {numCell(x.otp_DW, pct(x.otp_DW, f), C.DW)}
+      {numCell(x.walk_TS, pct(x.walk_TS, x.otp_TS), C.TS)}
+      {numCell(x.walk_DW, pct(x.walk_DW, x.otp_DW), C.DW)}
+    </>
+  }
 
   return (
     <div style={{ marginTop: 14, border: `1px solid ${t.border2 || t.border}`, borderRadius: 20, background: `linear-gradient(160deg,${t.card2},${t.card3 || t.card2})`, boxShadow: t.shadow, overflow: 'hidden' }}>
@@ -113,7 +130,7 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
         <div style={{ width: 3, height: 20, borderRadius: 2, background: `linear-gradient(180deg,${t.blue},${t.gold})`, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: isMobile ? 12.5 : 14, color: t.text2, letterSpacing: isMobile ? '.08em' : '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Walk-in Analysis</div>
-          {open && <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>Jarvis walk-in → OTP (Telesales / Direct) → CRM walk-ins, by region &amp; branch · Sundays excluded · defaults to yesterday</div>}
+          {open && <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>Jarvis walk-in → OTP (Telesales / Direct) → Actual walk-ins, by region &amp; branch · Sundays excluded · defaults to yesterday</div>}
         </div>
         <div style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, background: `${t.gold}12`, border: `1px solid ${t.gold}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.gold, fontSize: 11, transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .3s' }}>▼</div>
       </div>
@@ -169,7 +186,7 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
                           <th rowSpan={2} style={{ ...th, textAlign: 'left' }}>Region / Branch</th>
                           {jarvis && <th rowSpan={2} style={th}>Jarvis walk-in<div style={{ fontSize: 9, color: t.text4, fontWeight: 500 }}>group / unique</div></th>}
                           <th colSpan={2} style={{ ...th, textAlign: 'center', borderLeft: `1px solid ${t.border}` }}>OTP generated</th>
-                          <th colSpan={2} style={{ ...th, textAlign: 'center', borderLeft: `1px solid ${t.border}` }}>CRM walk-ins</th>
+                          <th colSpan={2} style={{ ...th, textAlign: 'center', borderLeft: `1px solid ${t.border}` }}>Actual walk-ins</th>
                         </tr>
                         <tr>
                           <th style={{ ...th, color: C.TS, borderLeft: `1px solid ${t.border}` }}>Telesales</th>
@@ -189,15 +206,15 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
                           return (
                             <RegionGroup key={r.region} r={r} show={show}
                               toggle={() => setCollapsed(s => { const n = new Set(s); n.has(r.region) ? n.delete(r.region) : n.add(r.region); return n })}
-                              t={t} td={td} jarvis={jarvis} C={C} dataCells={dataCells} jcell={jcell} isMobile={isMobile} />
+                              t={t} td={td} dataCells={dataCells} />
                           )
                         })}
                       </tbody>
                     </table>
                   </div>
                   <div style={{ padding: '9px 14px', borderTop: `1px solid ${t.border}`, fontSize: 11.5, color: t.text3, display: 'flex', flexWrap: 'wrap', gap: 14 }}>
-                    <span>Click a region to collapse its branches.</span>
-                    {d.no_otp > 0 && <span style={{ color: t.text4 }}>· {fmtN(d.no_otp)} CRM walk-ins had no OTP (not in Telesales/Direct)</span>}
+                    <span>% under OTP = of Jarvis footfall · % under Actual walk-ins = of that channel&apos;s OTPs{jarvis ? ' · % under Jarvis = footfall that became a walk-in' : ''}. Click a region to collapse its branches.</span>
+                    {d.no_otp > 0 && <span style={{ color: t.text4 }}>· {fmtN(d.no_otp)} actual walk-ins had no OTP (not in Telesales/Direct)</span>}
                     {!jarvis && <span style={{ color: t.text4 }}>· Jarvis footfall not available for your account</span>}
                   </div>
                 </div>
@@ -210,7 +227,7 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
   )
 }
 
-function RegionGroup({ r, show, toggle, t, td, jarvis, C, dataCells, jcell, isMobile }) {
+function RegionGroup({ r, show, toggle, t, td, dataCells }) {
   return (
     <>
       <tr onClick={toggle} style={{ cursor: 'pointer', background: t.card2 || t.card }}>
