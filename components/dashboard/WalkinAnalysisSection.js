@@ -75,37 +75,8 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
     fontSize: 11.5, fontWeight: active ? 700 : 500, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
   })
 
-  // Funnel stages, scaled to the largest stage so the bars read as a funnel.
-  const jGroup = d?.jarvis?.available ? d.jarvis.group : null
-  const stages = d ? [
-    ...(d.jarvis?.available ? [{
-      key: 'jarvis', color: C.jarvis, label: 'Jarvis walk-ins', value: d.jarvis.group,
-      note: `camera branches${d.jarvis.cameraBranches ? ` · ${d.jarvis.cameraBranches}` : ''}`,
-      split: [{ label: 'Group', value: d.jarvis.group, color: t.blue }, { label: 'Unique', value: d.jarvis.footfall, color: t.text4 }],
-    }] : []),
-    { key: 'otp', color: C.otp, label: 'OTPs generated', value: d.otp.total,
-      split: [{ label: 'Telesales', value: d.otp.TS, color: C.TS }, { label: 'Direct Walk-in', value: d.otp.DW, color: C.DW }] },
-    { key: 'punch', color: C.punch, label: 'CRM punch-ins (walk-ins)', value: d.punch.total,
-      split: [{ label: 'Telesales', value: d.punch.TS, color: C.TS }, { label: 'Direct Walk-in', value: d.punch.DW, color: C.DW }, ...(d.punch.no_otp ? [{ label: 'No OTP', value: d.punch.no_otp, color: t.text4 }] : [])] },
-  ] : []
-  const maxStage = Math.max(1, ...stages.map(s => s.value || 0))
-
   // Conversion between consecutive stages.
   const conv = (a, b) => (a > 0 ? b / a : null)
-
-  const Split = ({ parts }) => {
-    const total = parts.reduce((s, p) => s + (p.value || 0), 0) || 1
-    return (
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 6, fontSize: 11, color: t.text2 }}>
-        {parts.map(p => (
-          <span key={p.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-            <span style={{ width: 7, height: 7, borderRadius: 2, background: p.color }} />
-            {p.label} <b style={{ color: t.text1, fontWeight: 700 }}>{fmtN(p.value)}</b> <span style={{ color: t.text4 }}>({Math.round(((p.value || 0) / total) * 100)}%)</span>
-          </span>
-        ))}
-      </div>
-    )
-  }
 
   const detailBox = (shown, setShown, label, color, child) => (
     <div style={{ marginTop: 12, background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden' }}>
@@ -162,58 +133,71 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
                   No walk-in activity recorded for {from === to ? from : `${from} → ${to}`} — branches may have been closed that day. Pick another day above.
                 </div>
               )}
-              {!empty && <>
-              {/* ── Funnel ── */}
-              <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: isMobile ? '14px' : '16px 18px' }}>
-                {stages.map((sg, i) => {
-                  const prev = i > 0 ? stages[i - 1] : null
-                  const c = prev ? conv(prev.value, sg.value) : null
-                  return (
-                    <div key={sg.key}>
-                      {prev && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0 7px 2px', color: t.text3, fontSize: 11.5 }}>
-                          <span style={{ color: t.text4 }}>↓</span>
-                          <span><b style={{ color: t.text1, fontWeight: 700 }}>{fmtPctR(c)}</b> {prev.key === 'jarvis' ? 'of footfall generated an OTP' : 'of OTPs became a walk-in'}</span>
-                        </div>
-                      )}
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 5 }}>
-                          <span style={{ fontSize: 12.5, fontWeight: 700, color: sg.color }}>{sg.label}{sg.note ? <span style={{ color: t.text4, fontWeight: 400, fontSize: 11, marginLeft: 6 }}>{sg.note}</span> : null}</span>
-                          <span style={{ fontSize: 18, fontWeight: 700, color: t.text1, fontVariantNumeric: 'tabular-nums' }}>{fmtN(sg.value)}</span>
-                        </div>
-                        <div style={{ height: 12, borderRadius: 6, background: t.border, overflow: 'hidden' }}>
-                          <div style={{ width: `${Math.max(2, (sg.value / maxStage) * 100)}%`, height: '100%', background: sg.color, borderRadius: 6, transition: 'width .5s ease' }} />
-                        </div>
-                        <Split parts={sg.split} />
-                      </div>
-                    </div>
-                  )
-                })}
-                {!d.jarvis?.available && (
-                  <div style={{ marginTop: 10, fontSize: 11, color: t.text4 }}>Jarvis footfall isn&apos;t available for your account — funnel starts at OTPs.</div>
-                )}
-              </div>
-
-              {/* ── Per-channel attribution ── */}
-              <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 10, marginTop: 12 }}>
-                {[['TS', 'Telesales'], ['DW', 'Direct Walk-in']].map(([ch, label]) => {
-                  const o = d.otp[ch], p = d.punch[ch], rate = conv(o, p)
-                  return (
-                    <div key={ch} style={{ background: t.card, border: `1px solid ${t.border}`, borderTop: `2px solid ${C[ch]}`, borderRadius: 12, padding: '12px 14px' }}>
-                      <div style={{ fontSize: 11, color: C[ch], textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 700 }}>{label} <span style={{ color: t.text4 }}>· {ch}</span></div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gap: 8, marginTop: 8 }}>
-                        {[['OTPs', o], ['Walk-ins', p], ['Conversion', null, rate]].map(([lab, n, r]) => (
-                          <div key={lab} style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: 10, color: t.text4, textTransform: 'uppercase', letterSpacing: '.06em', fontWeight: 600 }}>{lab}</div>
-                            <div style={{ fontSize: 16, fontWeight: 700, color: t.text1, fontVariantNumeric: 'tabular-nums' }}>{r !== undefined ? fmtPctR(r) : fmtN(n)}</div>
-                          </div>
+              {!empty && (() => {
+                const g = d.jarvis?.available ? d.jarvis.group : null
+                const rows = [
+                  d.jarvis?.available && { key: 'jarvis', color: C.jarvis, stage: 'Jarvis walk-ins', sub: 'store footfall', count: d.jarvis.group, extra: `${fmtN(d.jarvis.footfall)} unique`, ts: null, dw: null, ofFoot: g ? 1 : null, step: null },
+                  { key: 'otp', color: C.otp, stage: 'OTPs generated', sub: 'Telesales + Direct Walk-in', count: d.otp.total, ts: d.otp.TS, dw: d.otp.DW, ofFoot: g ? d.otp.total / g : null, step: g ? d.otp.total / g : null, stepOf: 'of footfall' },
+                  { key: 'punch', color: C.punch, stage: 'CRM punch-ins', sub: 'walk-ins created', count: d.punch.total, ts: d.punch.TS, dw: d.punch.DW, ofFoot: g ? d.punch.total / g : null, step: d.otp.total ? d.punch.total / d.otp.total : null, stepOf: 'of OTPs' },
+                ].filter(Boolean)
+                const maxCount = Math.max(1, ...rows.map(r => r.count || 0))
+                const th = { padding: '9px 10px', textAlign: 'right', fontSize: 10.5, color: t.text3, textTransform: 'uppercase', letterSpacing: '.05em', fontWeight: 700, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap' }
+                const td = { padding: '10px', fontSize: 13, color: t.text2, borderBottom: `1px solid ${t.border}`, textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
+                const tsRate = conv(d.otp.TS, d.punch.TS), dwRate = conv(d.otp.DW, d.punch.DW)
+                return (
+                <>
+                <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden' }}>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ ...th, textAlign: 'left' }}>Journey stage</th>
+                          <th style={th}>Count</th>
+                          <th style={{ ...th, color: C.TS }}>Telesales</th>
+                          <th style={{ ...th, color: C.DW }}>Direct Walk-in</th>
+                          {g != null && <th style={th}>% of footfall</th>}
+                          <th style={th}>Step conversion</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((r, i) => (
+                          <tr key={r.key}>
+                            <td style={{ ...td, textAlign: 'left' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ width: 3, height: 26, borderRadius: 2, background: r.color, flexShrink: 0 }} />
+                                <span>
+                                  <span style={{ color: t.text1, fontWeight: 700 }}>{i + 1}. {r.stage}</span>
+                                  <span style={{ display: 'block', color: t.text4, fontSize: 11 }}>{r.sub}</span>
+                                </span>
+                              </div>
+                            </td>
+                            <td style={td}>
+                              <span style={{ fontSize: 15, fontWeight: 700, color: t.text1 }}>{fmtN(r.count)}</span>
+                              {r.extra && <span style={{ color: t.text4, fontSize: 11, marginLeft: 5 }}>+ {r.extra}</span>}
+                              <div style={{ height: 5, borderRadius: 3, background: t.border, overflow: 'hidden', marginTop: 5 }}>
+                                <div style={{ width: `${Math.max(2, (r.count / maxCount) * 100)}%`, height: '100%', background: r.color, borderRadius: 3 }} />
+                              </div>
+                            </td>
+                            <td style={{ ...td, color: r.ts == null ? t.text4 : C.TS }}>{r.ts == null ? '—' : fmtN(r.ts)}</td>
+                            <td style={{ ...td, color: r.dw == null ? t.text4 : C.DW }}>{r.dw == null ? '—' : fmtN(r.dw)}</td>
+                            {g != null && <td style={td}>{r.ofFoot == null ? '—' : fmtPctR(r.ofFoot)}</td>}
+                            <td style={{ ...td, color: r.step == null ? t.text4 : t.text1, fontWeight: r.step == null ? 400 : 700 }}>
+                              {r.step == null ? '—' : <>{fmtPctR(r.step)} <span style={{ color: t.text4, fontSize: 11, fontWeight: 400 }}>{r.stepOf}</span></>}
+                            </td>
+                          </tr>
                         ))}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-              </>}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ padding: '10px 14px', borderTop: `1px solid ${t.border}`, fontSize: 11.5, color: t.text3, display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+                    <span>OTP → walk-in by channel: <b style={{ color: C.TS }}>Telesales {fmtPctR(tsRate)}</b> · <b style={{ color: C.DW }}>Direct Walk-in {fmtPctR(dwRate)}</b></span>
+                    {d.punch.no_otp > 0 && <span style={{ color: t.text4 }}>· {fmtN(d.punch.no_otp)} walk-ins had no OTP</span>}
+                    {g == null && <span style={{ color: t.text4 }}>· Jarvis footfall not available for your account</span>}
+                  </div>
+                </div>
+                </>
+                )
+              })()}
 
               {/* ── Expandable detail (shared date) ── */}
               {detailBox(showOtp, setShowOtp, 'Telesales vs Direct Walk-in — full breakdown', t.gold,
