@@ -22,8 +22,7 @@ import LiveFeedFlashcards from './LiveFeedFlashcards'
 import MonthProjection from './MonthProjection'
 import BusinessCalendarInsight from './BusinessCalendarInsight'
 import JarvisFootfallCard from './JarvisFootfallCard'
-import JarvisFootfallSection from './JarvisFootfallSection'
-import OtpChannelsSection from './OtpChannelsSection'
+import WalkinAnalysisSection from './WalkinAnalysisSection'
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 const MONTHS   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -1208,11 +1207,9 @@ export default function DynamicDashboard() {
         </CollapsibleSection>
       )}
 
-      {/* ── Jarvis · store footfall ── */}
-      {/* ── Telesales vs Direct Walk-in (CRM OTP generation) — same audience as the live walk-in tiles ── */}
-      {canSee('tab.purchase-data.live') && <OtpChannelsSection t={t} isMobile={isMobile} period={dashFilters.period} filterType={dashFilters.filterType} filterValue={dashFilters.filterValue} />}
-
-      {canSeeJarvis(userProfile?.role, userProfile?.email) && <JarvisFootfallSection t={t} isMobile={isMobile} />}
+      {/* ── Walk-in Analysis: Jarvis footfall → OTP (TS/DW) → CRM punch-ins, merged ── */}
+      {(canSee('tab.purchase-data.live') || canSeeJarvis(userProfile?.role, userProfile?.email)) &&
+        <WalkinAnalysisSection t={t} isMobile={isMobile} filterType={dashFilters.filterType} filterValue={dashFilters.filterValue} />}
 
       {/* ── Telesales ── */}
       {hasTelesales && (

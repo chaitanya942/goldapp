@@ -17,8 +17,7 @@ import MonthProjection from './MonthProjection'
 import TodaysBookingsWidget from './TodaysBookingsWidget'
 import BusinessCalendarInsight from './BusinessCalendarInsight'
 import JarvisFootfallCard from './JarvisFootfallCard'
-import JarvisFootfallSection from './JarvisFootfallSection'
-import OtpChannelsSection from './OtpChannelsSection'
+import WalkinAnalysisSection from './WalkinAnalysisSection'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const fmtDate = (iso) => { if (!iso) return ''; const [y,m,d] = iso.split('-'); return `${d}-${MONTHS[+m-1]}-${y}` }
@@ -1495,140 +1494,7 @@ export default function DashboardHome() {
         </div>
       )}
 
-      {/* ── MOBILE MODULE GRID — clean grouped-by-module view (role-aware) ── */}
-      {isMobile && (() => {
-        const visibleModules = getVisibleModules(canSee)
-        if (visibleModules.length === 0) return null
-        const tapModule = (m) => {
-          if (m.comingSoon) { openMobileMenuWithModule(m.id); return }
-          if (m.visibleTabs.length === 1) { setActiveNav(m.visibleTabs[0].id); return }
-          openMobileMenuWithModule(m.id)
-        }
-        return (
-          <div style={{ marginTop: 8, marginBottom: 16 }}>
-            <div style={{ fontSize: 11, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: 10 }}>Your Modules</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
-              {visibleModules.map((m, i) => (
-                <button key={m.id} onClick={() => tapModule(m)}
-                  style={{
-                    background: `linear-gradient(135deg, ${m.color}10, ${t.card2})`,
-                    border: `1px solid ${m.color}25`, borderRadius: 14, padding: '14px 14px',
-                    display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8,
-                    cursor: 'pointer', textAlign: 'left',
-                    opacity: m.comingSoon ? 0.7 : 1,
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                    transition: 'transform .15s, border-color .15s',
-                  }}
-                  onTouchStart={e => e.currentTarget.style.transform = 'scale(0.98)'}
-                  onTouchEnd={e => e.currentTarget.style.transform = 'scale(1)'}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                    <div style={{ width: 36, height: 36, borderRadius: 10, background: `${m.color}25`, border: `1px solid ${m.color}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>{m.icon}</div>
-                    {m.comingSoon && <div style={{ fontSize: 9, padding: '2px 6px', background: `${t.text4}25`, color: t.text3, borderRadius: 4, fontWeight: 600 }}>SOON</div>}
-                  </div>
-                  <div style={{ fontSize: 13, color: t.text1, fontWeight: 600, lineHeight: 1.2 }}>{m.label}</div>
-                  <div style={{ fontSize: 10, color: t.text3 }}>
-                    {m.comingSoon ? 'Coming soon' : `${m.visibleTabs.length} section${m.visibleTabs.length !== 1 ? 's' : ''}`}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        )
-      })()}
-
-      {/* ── DESKTOP MODULE HUB (per-page cards with stats) ── */}
-      {!isMobile && (() => {
-        const cards = [
-          canSee('purchase-data') && {
-            id: 'purchase-data', icon: '◉', label: 'Purchase Data', color: t.gold,
-            metrics: [
-              { label: "Today's Bills",  value: todayKpis?.total_count > 0 ? Number(todayKpis.total_count).toLocaleString('en-IN') : '—' },
-              { label: 'Net Weight',     value: todayKpis?.total_net > 0 ? `${Number(todayKpis.total_net).toFixed(1)}g` : '—' },
-            ],
-            cta: 'Open Purchase Data',
-          },
-          canSee('purchase-reports') && {
-            id: 'purchase-reports', icon: '📈', label: 'Purchase Reports', color: t.green,
-            metrics: [
-              { label: 'MTD Bills',  value: kpis?.total_count > 0 ? Number(kpis.total_count).toLocaleString('en-IN') : '—' },
-              { label: 'MTD Value',  value: kpis?.total_value > 0 ? (Number(kpis.total_value)/1e7 >= 1 ? `₹${(Number(kpis.total_value)/1e7).toFixed(1)}Cr` : `₹${Number(kpis.total_value).toLocaleString('en-IN',{maximumFractionDigits:0})}`) : '—' },
-            ],
-            cta: 'Open Reports',
-          },
-          canSee('consignment-overview') && {
-            id: 'consignment-overview', icon: '📦', label: 'Branch Stock', color: t.orange,
-            metrics: [
-              { label: "Today's Bills",  value: consignStats ? String(consignStats.branchTodayBills || 0) : '—' },
-              { label: "Today's Net Wt", value: consignStats ? fmtWtDash(consignStats.branchTodayNetWt || 0) : '—' },
-            ],
-            cta: 'Open Branch Stock',
-          },
-          (canSee('consignment-data') || canSee('consignment-report') || canSee('consignment-summary')) && !canSee('consignment-overview') && {
-            id: 'consignment-data', icon: '📦', label: 'Consignments', color: t.orange,
-            metrics: [{ label: 'Data & Reports', value: '→' }],
-            cta: 'Open Consignments',
-          },
-          canSee('inbound-bot') && {
-            id: 'inbound-bot', icon: '◑', label: 'Telesales', color: t.purple,
-            metrics: [
-              { label: "Today's Calls",  value: telesalesStats ? String(telesalesStats.total) : '—' },
-              { label: 'Engagement',     value: telesalesStats ? `${telesalesStats.engageRate}%` : '—' },
-              { label: 'Interested',     value: telesalesStats ? String(telesalesStats.interested) : '—' },
-            ],
-            cta: 'Open Inbound Bot',
-          },
-          canSee('live-market-rates') && {
-            id: 'live-market-rates', icon: '◎', label: 'Market Rates', color: t.blue,
-            metrics: [{ label: 'Live gold rates', value: '24K / 22K / 18K' }],
-            cta: 'Open Market Rates',
-          },
-          canSee('cal-table') && {
-            id: 'cal-table', icon: '⊛', label: 'Cal Table', color: t.text2,
-            metrics: [{ label: 'Sales pricing calculator', value: '→' }],
-            cta: 'Open Cal Table',
-          },
-          (canSee('user-management') || canSee('branch-management')) && {
-            id: 'user-management', icon: '⚙', label: 'Administration', color: t.red,
-            metrics: [
-              { label: 'Active Users',    value: adminStats ? String(adminStats.userCount) : '—' },
-              { label: 'Active Branches', value: adminStats ? String(adminStats.branchCount) : '—' },
-            ],
-            cta: canSee('user-management') ? 'Open User Management' : 'Open Branch Management',
-          },
-        ].filter(Boolean)
-
-        if (cards.length === 0) return (
-          <div style={{ marginTop: 8, background:`linear-gradient(135deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:20, padding:'40px 44px', boxShadow:t.shadow, textAlign:'center' }}>
-            <div style={{ fontSize:'2rem', opacity:.15, marginBottom:16 }}>◈</div>
-            <div style={{ fontSize:15, color:t.text2, fontWeight:500, marginBottom:8 }}>Your workspace is ready</div>
-            <div style={{ fontSize:13, color:t.text4, lineHeight:1.7 }}>
-              The modules available to your role will appear here.<br />
-              Contact your administrator if you need access to additional sections.
-            </div>
-          </div>
-        )
-
-        const cols = isMobile ? (cards.length === 1 ? 1 : 2) : (cards.length === 1 ? 1 : cards.length === 2 ? 2 : cards.length <= 4 ? 2 : 3)
-        return (
-          <div style={{ marginTop: 8, marginBottom: 4 }}>
-            <div style={{ fontSize: 11, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>Your Modules</div>
-            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 14 }}>
-              {cards.map((card, i) => (
-                <ModuleCard
-                  key={card.id}
-                  icon={card.icon} label={card.label} color={card.color}
-                  metrics={card.metrics} cta={card.cta}
-                  onClick={() => setActiveNav(card.id)}
-                  loading={hubLoading}
-                  t={t} delay={i * 60} compact={isMobile}
-                />
-              ))}
-            </div>
-          </div>
-        )
-      })()}
-
-      {/* ── PURCHASE OVERVIEW ── */}
+      {/* ── PURCHASE OVERVIEW (moved: directly below today’s walk-in data) ── */}
       {showPurchase && <div style={{ marginTop: 8, border:`1px solid ${t.border2}`, borderRadius:20, background:`linear-gradient(160deg,${t.card2},${t.card3})`, boxShadow:`${t.shadow},inset 0 1px 0 rgba(255,255,255,.03)`, position:'relative', overflow:'hidden', transition:'all .35s ease' }}>
         <div style={{ position:'absolute', top:0, left:0, width:160, height:160, background:`radial-gradient(circle at top left,${t.gold}08,transparent 70%)`, pointerEvents:'none' }}/>
 
@@ -1940,11 +1806,143 @@ export default function DashboardHome() {
         </div>
       </div>}
 
-      {/* ── Telesales vs Direct Walk-in (CRM OTP generation) ── */}
-      <OtpChannelsSection t={t} isMobile={isMobile} period={period} filterType={filterType} filterValue={filterValue} />
+      {/* ── Walk-in Analysis: Jarvis footfall → OTP (TS/DW) → CRM punch-ins, merged ── */}
+      <WalkinAnalysisSection t={t} isMobile={isMobile} filterType={filterType} filterValue={filterValue} />{/* WALKIN_ANALYSIS_MARKER */}
 
-      {/* ── JARVIS · STORE FOOTFALL (collapsible) ── */}
-      {canSeeJarvis(userProfile?.role, userProfile?.email) && <JarvisFootfallSection t={t} isMobile={isMobile} />}
+      {/* ── MOBILE MODULE GRID — clean grouped-by-module view (role-aware) ── */}
+      {isMobile && (() => {
+        const visibleModules = getVisibleModules(canSee)
+        if (visibleModules.length === 0) return null
+        const tapModule = (m) => {
+          if (m.comingSoon) { openMobileMenuWithModule(m.id); return }
+          if (m.visibleTabs.length === 1) { setActiveNav(m.visibleTabs[0].id); return }
+          openMobileMenuWithModule(m.id)
+        }
+        return (
+          <div style={{ marginTop: 8, marginBottom: 16 }}>
+            <div style={{ fontSize: 11, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: 10 }}>Your Modules</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+              {visibleModules.map((m, i) => (
+                <button key={m.id} onClick={() => tapModule(m)}
+                  style={{
+                    background: `linear-gradient(135deg, ${m.color}10, ${t.card2})`,
+                    border: `1px solid ${m.color}25`, borderRadius: 14, padding: '14px 14px',
+                    display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8,
+                    cursor: 'pointer', textAlign: 'left',
+                    opacity: m.comingSoon ? 0.7 : 1,
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                    transition: 'transform .15s, border-color .15s',
+                  }}
+                  onTouchStart={e => e.currentTarget.style.transform = 'scale(0.98)'}
+                  onTouchEnd={e => e.currentTarget.style.transform = 'scale(1)'}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 10, background: `${m.color}25`, border: `1px solid ${m.color}40`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>{m.icon}</div>
+                    {m.comingSoon && <div style={{ fontSize: 9, padding: '2px 6px', background: `${t.text4}25`, color: t.text3, borderRadius: 4, fontWeight: 600 }}>SOON</div>}
+                  </div>
+                  <div style={{ fontSize: 13, color: t.text1, fontWeight: 600, lineHeight: 1.2 }}>{m.label}</div>
+                  <div style={{ fontSize: 10, color: t.text3 }}>
+                    {m.comingSoon ? 'Coming soon' : `${m.visibleTabs.length} section${m.visibleTabs.length !== 1 ? 's' : ''}`}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ── DESKTOP MODULE HUB (per-page cards with stats) ── */}
+      {!isMobile && (() => {
+        const cards = [
+          canSee('purchase-data') && {
+            id: 'purchase-data', icon: '◉', label: 'Purchase Data', color: t.gold,
+            metrics: [
+              { label: "Today's Bills",  value: todayKpis?.total_count > 0 ? Number(todayKpis.total_count).toLocaleString('en-IN') : '—' },
+              { label: 'Net Weight',     value: todayKpis?.total_net > 0 ? `${Number(todayKpis.total_net).toFixed(1)}g` : '—' },
+            ],
+            cta: 'Open Purchase Data',
+          },
+          canSee('purchase-reports') && {
+            id: 'purchase-reports', icon: '📈', label: 'Purchase Reports', color: t.green,
+            metrics: [
+              { label: 'MTD Bills',  value: kpis?.total_count > 0 ? Number(kpis.total_count).toLocaleString('en-IN') : '—' },
+              { label: 'MTD Value',  value: kpis?.total_value > 0 ? (Number(kpis.total_value)/1e7 >= 1 ? `₹${(Number(kpis.total_value)/1e7).toFixed(1)}Cr` : `₹${Number(kpis.total_value).toLocaleString('en-IN',{maximumFractionDigits:0})}`) : '—' },
+            ],
+            cta: 'Open Reports',
+          },
+          canSee('consignment-overview') && {
+            id: 'consignment-overview', icon: '📦', label: 'Branch Stock', color: t.orange,
+            metrics: [
+              { label: "Today's Bills",  value: consignStats ? String(consignStats.branchTodayBills || 0) : '—' },
+              { label: "Today's Net Wt", value: consignStats ? fmtWtDash(consignStats.branchTodayNetWt || 0) : '—' },
+            ],
+            cta: 'Open Branch Stock',
+          },
+          (canSee('consignment-data') || canSee('consignment-report') || canSee('consignment-summary')) && !canSee('consignment-overview') && {
+            id: 'consignment-data', icon: '📦', label: 'Consignments', color: t.orange,
+            metrics: [{ label: 'Data & Reports', value: '→' }],
+            cta: 'Open Consignments',
+          },
+          canSee('inbound-bot') && {
+            id: 'inbound-bot', icon: '◑', label: 'Telesales', color: t.purple,
+            metrics: [
+              { label: "Today's Calls",  value: telesalesStats ? String(telesalesStats.total) : '—' },
+              { label: 'Engagement',     value: telesalesStats ? `${telesalesStats.engageRate}%` : '—' },
+              { label: 'Interested',     value: telesalesStats ? String(telesalesStats.interested) : '—' },
+            ],
+            cta: 'Open Inbound Bot',
+          },
+          canSee('live-market-rates') && {
+            id: 'live-market-rates', icon: '◎', label: 'Market Rates', color: t.blue,
+            metrics: [{ label: 'Live gold rates', value: '24K / 22K / 18K' }],
+            cta: 'Open Market Rates',
+          },
+          canSee('cal-table') && {
+            id: 'cal-table', icon: '⊛', label: 'Cal Table', color: t.text2,
+            metrics: [{ label: 'Sales pricing calculator', value: '→' }],
+            cta: 'Open Cal Table',
+          },
+          (canSee('user-management') || canSee('branch-management')) && {
+            id: 'user-management', icon: '⚙', label: 'Administration', color: t.red,
+            metrics: [
+              { label: 'Active Users',    value: adminStats ? String(adminStats.userCount) : '—' },
+              { label: 'Active Branches', value: adminStats ? String(adminStats.branchCount) : '—' },
+            ],
+            cta: canSee('user-management') ? 'Open User Management' : 'Open Branch Management',
+          },
+        ].filter(Boolean)
+
+        if (cards.length === 0) return (
+          <div style={{ marginTop: 8, background:`linear-gradient(135deg,${t.card},${t.card2})`, border:`1px solid ${t.border}`, borderRadius:20, padding:'40px 44px', boxShadow:t.shadow, textAlign:'center' }}>
+            <div style={{ fontSize:'2rem', opacity:.15, marginBottom:16 }}>◈</div>
+            <div style={{ fontSize:15, color:t.text2, fontWeight:500, marginBottom:8 }}>Your workspace is ready</div>
+            <div style={{ fontSize:13, color:t.text4, lineHeight:1.7 }}>
+              The modules available to your role will appear here.<br />
+              Contact your administrator if you need access to additional sections.
+            </div>
+          </div>
+        )
+
+        const cols = isMobile ? (cards.length === 1 ? 1 : 2) : (cards.length === 1 ? 1 : cards.length === 2 ? 2 : cards.length <= 4 ? 2 : 3)
+        return (
+          <div style={{ marginTop: 8, marginBottom: 4 }}>
+            <div style={{ fontSize: 11, color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>Your Modules</div>
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${cols}, 1fr)`, gap: 14 }}>
+              {cards.map((card, i) => (
+                <ModuleCard
+                  key={card.id}
+                  icon={card.icon} label={card.label} color={card.color}
+                  metrics={card.metrics} cta={card.cta}
+                  onClick={() => setActiveNav(card.id)}
+                  loading={hubLoading}
+                  t={t} delay={i * 60} compact={isMobile}
+                />
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
+
 
       {/* ── CONSIGNMENT OVERVIEW (collapsible) ──
           Gated specifically to consignment-report: this widget IS the

@@ -47,8 +47,12 @@ const fmtDay = (d) => { const [, m, dd] = d.split('-'); return `${dd}/${m}` }
 
 const FILTER_LABEL = { region: 'Region', state: 'State', cluster: 'Cluster', branch: 'Branch' }
 
-export default function OtpChannelsSection({ t, isMobile, period: dashPeriod = null, filterType = null, filterValue = null }) {
+// `embedded`: render without the collapsible shell/header and own period pills,
+// driven by a controlled `fromTo` ({from,to}) from a parent (the Walk-in
+// Analysis section) so one shared date filter controls everything.
+export default function OtpChannelsSection({ t, isMobile, period: dashPeriod = null, filterType = null, filterValue = null, embedded = false, fromTo = null }) {
   const [open, setOpen] = useState(true)
+  const effOpen = embedded || open
   const [period, setPeriod] = useState(dashPeriod || 'mtd')
   // The dashboard's period picker drives this section; its own pills (incl. Custom) can still override.
   useEffect(() => { if (dashPeriod) setPeriod(dashPeriod) }, [dashPeriod])
@@ -56,7 +60,7 @@ export default function OtpChannelsSection({ t, isMobile, period: dashPeriod = n
   const [custom, setCustom] = useState(() => { const t2 = istStr(istNow()); return { from: `${t2.slice(0, 7)}-01`, to: t2 } })
   const [state, setState] = useState({ loading: true, data: null, error: null })
   const [showAll, setShowAll] = useState(false)
-  const { from, to } = rangeFor(period, custom)
+  const { from, to } = embedded && fromTo ? { from: fromTo.from, to: fromTo.to } : rangeFor(period, custom)
   const today = istStr(istNow())
 
   const load = useCallback(async () => {
@@ -69,7 +73,7 @@ export default function OtpChannelsSection({ t, isMobile, period: dashPeriod = n
       setState({ loading: false, data: json, error: null })
     } catch (e) { setState(s => ({ loading: false, data: s.data, error: e.message })) }
   }, [from, to, loc?.type, loc?.value]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (open) load() }, [open, load])
+  useEffect(() => { if (effOpen) load() }, [effOpen, load])
 
   const d = state.data
   const branches = useMemo(() => (showAll ? d?.branches || [] : (d?.branches || []).slice(0, 12)), [d, showAll])
@@ -136,22 +140,13 @@ export default function OtpChannelsSection({ t, isMobile, period: dashPeriod = n
     setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
-  return (
-    <div style={{ marginTop: 14, border: `1px solid ${t.border2 || t.border}`, borderRadius: 20, background: `linear-gradient(160deg,${t.card2},${t.card3 || t.card2})`, boxShadow: t.shadow, overflow: 'hidden' }}>
-      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: isMobile ? '14px 16px' : '16px 24px', cursor: 'pointer', userSelect: 'none', borderBottom: open ? `1px solid ${t.border}` : 'none' }}>
-        <div style={{ width: 3, height: 20, borderRadius: 2, background: `linear-gradient(180deg,${t.blue},${t.gold})`, flexShrink: 0 }} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: isMobile ? 12.5 : 14, color: t.text2, letterSpacing: isMobile ? '.08em' : '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Telesales vs Direct Walk-in</div>
-          {open && <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>By CRM OTP (TS / DW) · OTPs by day generated, walk-ins by walk-in day, purchases by payment day · from 1 Oct 2026</div>}
-        </div>
-        <div style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, background: `${t.gold}12`, border: `1px solid ${t.gold}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.gold, fontSize: 11, transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .3s' }}>▼</div>
-      </div>
-
-      {open && (
-        <div style={{ padding: isMobile ? '14px' : '18px 24px 22px' }}>
+  const inner = (
+    <div style={{ padding: embedded ? 0 : (isMobile ? '14px' : '18px 24px 22px') }}>
           <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', marginBottom: 14, alignItems: 'center' }}>
-            {PERIODS.map(p => <button key={p.key} onClick={() => setPeriod(p.key)} style={pill(period === p.key)}>{p.label}</button>)}
-            {period === 'custom' ? (
+            {!embedded && PERIODS.map(p => <button key={p.key} onClick={() => setPeriod(p.key)} style={pill(period === p.key)}>{p.label}</button>)}
+            {embedded ? (
+              <span style={{ fontSize: 11.5, color: t.text3, whiteSpace: 'nowrap' }}>{from ? (from === to ? from : `${from} → ${to}`) : 'No data before 1 Oct 2026'}</span>
+            ) : period === 'custom' ? (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 6, flexShrink: 0 }}>
                 {['from', 'to'].map((k, i) => (
                   <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -242,8 +237,22 @@ export default function OtpChannelsSection({ t, isMobile, period: dashPeriod = n
               ))}
             </div>
           )}
+    </div>
+  )
+
+  if (embedded) return inner
+
+  return (
+    <div style={{ marginTop: 14, border: `1px solid ${t.border2 || t.border}`, borderRadius: 20, background: `linear-gradient(160deg,${t.card2},${t.card3 || t.card2})`, boxShadow: t.shadow, overflow: 'hidden' }}>
+      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: isMobile ? '14px 16px' : '16px 24px', cursor: 'pointer', userSelect: 'none', borderBottom: open ? `1px solid ${t.border}` : 'none' }}>
+        <div style={{ width: 3, height: 20, borderRadius: 2, background: `linear-gradient(180deg,${t.blue},${t.gold})`, flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: isMobile ? 12.5 : 14, color: t.text2, letterSpacing: isMobile ? '.08em' : '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Telesales vs Direct Walk-in</div>
+          {open && <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>By CRM OTP (TS / DW) · OTPs by day generated, walk-ins by walk-in day, purchases by payment day · from 1 Oct 2026</div>}
         </div>
-      )}
+        <div style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, background: `${t.gold}12`, border: `1px solid ${t.gold}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.gold, fontSize: 11, transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .3s' }}>▼</div>
+      </div>
+      {open && inner}
     </div>
   )
 }

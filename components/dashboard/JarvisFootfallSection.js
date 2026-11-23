@@ -80,8 +80,12 @@ function DailyChart({ t, days }) {
   )
 }
 
-export default function JarvisFootfallSection({ t, isMobile }) {
+// `embedded`: render without the collapsible shell/header and own period pills,
+// driven by a controlled `fromTo` ({from,to}) from the Walk-in Analysis section
+// so one shared date filter controls everything.
+export default function JarvisFootfallSection({ t, isMobile, embedded = false, fromTo = null }) {
   const [open, setOpen] = useState(false)
+  const effOpen = embedded || open
   const [period, setPeriod] = useState('yesterday')
   const [custom, setCustom] = useState(() => jarvisRange('week'))
   const [region, setRegion] = useState(null)
@@ -91,15 +95,16 @@ export default function JarvisFootfallSection({ t, isMobile }) {
   const [showAll, setShowAll] = useState(false)
 
   useEffect(() => {
+    if (embedded) return
     const onOpen = () => setOpen(true)
     window.addEventListener(JARVIS_OPEN_EVENT, onOpen)
     return () => window.removeEventListener(JARVIS_OPEN_EVENT, onOpen)
-  }, [])
+  }, [embedded])
 
-  const range = jarvisRange(period, custom)
+  const range = embedded && fromTo ? { from: fromTo.from, to: fromTo.to } : jarvisRange(period, custom)
   const { from, to } = range
   const yday = jarvisYesterday()
-  const { data, loading, error, reload } = useJarvisFootfall(open ? from : null, open ? to : null)
+  const { data, loading, error, reload } = useJarvisFootfall(effOpen ? from : null, effOpen ? to : null)
   const rows = from ? (data?.rows || []) : []
   const s = useMemo(() => summarizeFootfall(rows, { region, branch, count }), [rows, region, branch, count])
   const branchOptions = useMemo(() => [...new Set(rows.filter(r => r.footfall != null && (!region || r.region === region)).map(r => r.branch))].sort(), [rows, region])
@@ -120,7 +125,7 @@ export default function JarvisFootfallSection({ t, isMobile }) {
   const td = { padding: '7px 10px', fontSize: 12.5, color: t.text2, borderBottom: `1px solid ${t.border}`, textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
 
   let body = null
-  if (open) {
+  if (effOpen) {
     if (!from) {
       body = <div style={{ fontSize: 13, color: t.text3 }}>{range.note}. Today is excluded until the day is complete.</div>
     } else if (data?.tableMissing) {
@@ -205,24 +210,9 @@ export default function JarvisFootfallSection({ t, isMobile }) {
     }
   }
 
-  return (
-    <div id={JARVIS_SECTION_ID} style={{ marginTop: 14, border: `1px solid ${t.border2 || t.border}`, borderRadius: 20, background: `linear-gradient(160deg,${t.card2},${t.card3 || t.card2})`, boxShadow: t.shadow, overflow: 'hidden', scrollMarginTop: 80 }}>
-      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: open ? (isMobile ? '14px 16px' : '18px 24px') : (isMobile ? '10px 16px' : '12px 24px'), cursor: 'pointer', userSelect: 'none', borderBottom: open ? `1px solid ${t.border}` : 'none' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
-          <div style={{ width: 3, height: 20, borderRadius: 2, flexShrink: 0, background: `linear-gradient(180deg,${t.blue},${t.blue}40)`, boxShadow: `0 0 8px ${t.blue}60` }} />
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: isMobile ? 12.5 : 14, color: t.text2, letterSpacing: isMobile ? '.08em' : '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Jarvis · Store Footfall</div>
-            {open && synced && <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>synced {synced}</div>}
-          </div>
-        </div>
-        {open && (
-          <button onClick={e => { e.stopPropagation(); reload() }} style={{ padding: '4px 10px', borderRadius: 7, border: `1px solid ${t.border}`, background: t.card, color: t.text3, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>↻</button>
-        )}
-        <div style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, background: `${t.blue}12`, border: `1px solid ${t.blue}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.blue, fontSize: 11, transition: 'transform .35s', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}>▼</div>
-      </div>
-
-      {open && (
-        <div style={{ padding: isMobile ? '14px 14px 18px' : '18px 24px 22px' }}>
+  const inner = (
+        <div style={{ padding: embedded ? 0 : (isMobile ? '14px 14px 18px' : '18px 24px 22px') }}>
+          {!embedded && (
           <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', marginBottom: 8 }}>
             {JARVIS_PERIODS.map(p => <button key={p.key} onClick={() => setPeriod(p.key)} style={pill(period === p.key)}>{p.label}</button>)}
             {period === 'custom' ? (
@@ -240,6 +230,7 @@ export default function JarvisFootfallSection({ t, isMobile }) {
               <span style={{ fontSize: 11.5, color: t.text3, alignSelf: 'center', marginLeft: 6, whiteSpace: 'nowrap' }}>{from ? `${from === to ? from : `${from} → ${to}`}${range.hint ? ` · ${range.hint}` : ''}` : range.note}</span>
             )}
           </div>
+          )}
           <div style={{ marginBottom: 8 }}>
             <FootfallCountToggle t={t} value={count} onChange={setCount} groupMissing={!!data && !rows.some(r => r.group != null)} />
           </div>
@@ -255,7 +246,26 @@ export default function JarvisFootfallSection({ t, isMobile }) {
           </div>
           {body}
         </div>
-      )}
+  )
+
+  if (embedded) return inner
+
+  return (
+    <div id={JARVIS_SECTION_ID} style={{ marginTop: 14, border: `1px solid ${t.border2 || t.border}`, borderRadius: 20, background: `linear-gradient(160deg,${t.card2},${t.card3 || t.card2})`, boxShadow: t.shadow, overflow: 'hidden', scrollMarginTop: 80 }}>
+      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: open ? (isMobile ? '14px 16px' : '18px 24px') : (isMobile ? '10px 16px' : '12px 24px'), cursor: 'pointer', userSelect: 'none', borderBottom: open ? `1px solid ${t.border}` : 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
+          <div style={{ width: 3, height: 20, borderRadius: 2, flexShrink: 0, background: `linear-gradient(180deg,${t.blue},${t.blue}40)`, boxShadow: `0 0 8px ${t.blue}60` }} />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: isMobile ? 12.5 : 14, color: t.text2, letterSpacing: isMobile ? '.08em' : '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Jarvis · Store Footfall</div>
+            {open && synced && <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>synced {synced}</div>}
+          </div>
+        </div>
+        {open && (
+          <button onClick={e => { e.stopPropagation(); reload() }} style={{ padding: '4px 10px', borderRadius: 7, border: `1px solid ${t.border}`, background: t.card, color: t.text3, fontSize: 12, cursor: 'pointer', flexShrink: 0 }}>↻</button>
+        )}
+        <div style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, background: `${t.blue}12`, border: `1px solid ${t.blue}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.blue, fontSize: 11, transition: 'transform .35s', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' }}>▼</div>
+      </div>
+      {open && inner}
     </div>
   )
 }
