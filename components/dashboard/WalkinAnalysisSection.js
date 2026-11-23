@@ -12,8 +12,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { authedFetch } from '../../lib/authedFetch'
 import { istNow, istStr, istLastWeekRange } from '../../lib/dateIst'
-import OtpChannelsSection from './OtpChannelsSection'
-import JarvisFootfallSection from './JarvisFootfallSection'
 
 const DATA_START = '2026-10-01'
 const PERIODS = [
@@ -52,8 +50,6 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
   const [regionSel, setRegionSel] = useState(null)
   const [branchSel, setBranchSel] = useState(null)
   const [collapsed, setCollapsed] = useState(() => new Set())   // regions in here are collapsed; default all expanded
-  const [showOtp, setShowOtp] = useState(false)
-  const [showJarvis, setShowJarvis] = useState(false)
   const loc = filterType && filterValue ? { type: filterType, value: filterValue } : null
   const { from, to } = rangeFor(period, custom)
   const yday = istStr(new Date(istNow() - 86400000))
@@ -110,17 +106,6 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
     <td style={{ ...td, color: C.TS }}>{fmtN(x.walk_TS)}</td>
     <td style={{ ...td, color: C.DW }}>{fmtN(x.walk_DW)}</td>
   </>
-
-  const detailBox = (shown, setShown, label, color, child) => (
-    <div style={{ marginTop: 12, background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden' }}>
-      <div onClick={() => setShown(v => !v)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', cursor: 'pointer', userSelect: 'none', borderBottom: shown ? `1px solid ${t.border}` : 'none' }}>
-        <div style={{ width: 3, height: 16, borderRadius: 2, background: color, flexShrink: 0 }} />
-        <div style={{ flex: 1, fontSize: 12.5, fontWeight: 700, color: t.text2 }}>{label}</div>
-        <div style={{ color: t.text3, fontSize: 11, transform: shown ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .3s' }}>▼</div>
-      </div>
-      {shown && <div style={{ padding: isMobile ? '12px' : '14px 16px' }}>{child}</div>}
-    </div>
-  )
 
   return (
     <div style={{ marginTop: 14, border: `1px solid ${t.border2 || t.border}`, borderRadius: 20, background: `linear-gradient(160deg,${t.card2},${t.card3 || t.card2})`, boxShadow: t.shadow, overflow: 'hidden' }}>
@@ -217,12 +202,6 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
                   </div>
                 </div>
               )}
-
-              {/* ── Expandable detail (shared date) ── */}
-              {detailBox(showOtp, setShowOtp, 'Telesales vs Direct Walk-in — full breakdown', t.gold,
-                <OtpChannelsSection t={t} isMobile={isMobile} embedded fromTo={{ from, to }} filterType={filterType} filterValue={filterValue} />)}
-              {jarvis && detailBox(showJarvis, setShowJarvis, 'Jarvis footfall — by branch', t.blue,
-                <JarvisFootfallSection t={t} isMobile={isMobile} embedded fromTo={{ from, to }} />)}
             </div>
           )}
         </div>

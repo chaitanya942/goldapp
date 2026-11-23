@@ -9,16 +9,34 @@ export default function PWAUpdater() {
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return
 
+    // When a new service worker takes control, reload once so the live client
+    // bundle replaces whatever is running — no "Update" tap needed. Guarded so
+    // a first install (no prior controller) and repeated events don't loop.
+    const hadController = !!navigator.serviceWorker.controller
+    let refreshing = false
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || refreshing) return
+      refreshing = true
+      window.location.reload()
+    })
+
     navigator.serviceWorker.register('/sw.js').then(reg => {
+      // Activate a worker that's already waiting from a previous visit.
+      if (reg.waiting && navigator.serviceWorker.controller) reg.waiting.postMessage({ type: 'SKIP_WAITING' })
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing
+        if (!newWorker) return
         newWorker.addEventListener('statechange', () => {
           if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            // Auto-apply; controllerchange above then reloads. Keep the manual
+            // prompt as a fallback in case the browser doesn't swap in time.
+            newWorker.postMessage({ type: 'SKIP_WAITING' })
             setWorker(newWorker)
             setShowUpdate(true)
           }
         })
       })
+      reg.update?.()
     })
   }, [])
 
