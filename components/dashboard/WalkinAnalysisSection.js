@@ -136,7 +136,6 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
         <div style={{ width: 3, height: 20, borderRadius: 2, background: `linear-gradient(180deg,${t.blue},${t.gold})`, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: isMobile ? 12.5 : 14, color: t.text2, letterSpacing: isMobile ? '.08em' : '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Walk-in Analysis</div>
-          {open && <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>Jarvis walk-in → OTP (Telesales / Direct) → Actual walk-ins, by region &amp; branch · Sundays excluded · defaults to yesterday (Saturday if yesterday was Sunday)</div>}
         </div>
         <div style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, background: `${t.gold}12`, border: `1px solid ${t.gold}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.gold, fontSize: 11, transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .3s' }}>▼</div>
       </div>
@@ -218,13 +217,6 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
                       </tbody>
                     </table>
                   </div>
-                  {((d.unplaced && (d.unplaced.otp_TS + d.unplaced.otp_DW + d.unplaced.walk_TS + d.unplaced.walk_DW) > 0) || d.no_otp > 0 || !jarvis) && (
-                  <div style={{ padding: '9px 14px', borderTop: `1px solid ${t.border}`, fontSize: 11.5, color: t.text3, display: 'flex', flexWrap: 'wrap', gap: 14 }}>
-                    {d.unplaced && (d.unplaced.otp_TS + d.unplaced.otp_DW + d.unplaced.walk_TS + d.unplaced.walk_DW) > 0 && <span style={{ color: t.text4 }}>· {fmtN(d.unplaced.otp_TS + d.unplaced.otp_DW)} OTPs had no branch anywhere in the CRM and aren&apos;t in any region</span>}
-                    {d.no_otp > 0 && <span style={{ color: t.text4 }}>· {fmtN(d.no_otp)} actual walk-ins had no OTP (not in Telesales/Direct)</span>}
-                    {!jarvis && <span style={{ color: t.text4 }}>· Jarvis footfall not available for your account</span>}
-                  </div>
-                  )}
                 </div>
               )}
             </div>
