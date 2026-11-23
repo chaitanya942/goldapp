@@ -59,35 +59,30 @@ export async function GET(req) {
   const hit = cache.get(key)
   if (hit && Date.now() - hit.ts < CACHE_MS) return Response.json({ ...hit.data, cached: true })
 
+  const isSunday = (d) => new Date(`${d}T00:00:00Z`).getUTCDay() === 0
+
   try {
     const [{ data: branchMeta }, otp] = await Promise.all([
       supabase.from('branches').select('name, region, state, cluster'),
-      buildOtpChannelReport({ from, to, allowedRegions, filter }),
+      buildOtpChannelReport({ from, to, allowedRegions, filter, excludeSundays: true }),
     ])
 
-    // ── Per-day union: OTPs + punch-ins (from the OTP report) ──
-    const days = new Map()
-    const dayCell = (d) => days.get(d) || days.set(d, { date: d, otp_TS: 0, otp_DW: 0, punch_TS: 0, punch_DW: 0, jarvis_group: 0, jarvis_footfall: 0 }).get(d)
-    for (const x of otp.days || []) {
-      const c = dayCell(x.date)
-      c.otp_TS = x.TS || 0; c.otp_DW = x.DW || 0
-      c.punch_TS = x.TS_walk || 0; c.punch_DW = x.DW_walk || 0
+    // ── Per-branch combined cell (OTP + CRM walk-ins by channel, + Jarvis) ──
+    const branchMap = new Map()
+    const bcell = (name, region) => branchMap.get(name) || branchMap.set(name, {
+      branch: name, region: region || 'Unassigned',
+      jarvis_group: 0, jarvis_unique: 0, otp_TS: 0, otp_DW: 0, walk_TS: 0, walk_DW: 0,
+    }).get(name)
+    for (const b of otp.branches || []) {
+      const c = bcell(b.branch, b.region)
+      c.otp_TS = b.TS.otps; c.otp_DW = b.DW.otps
+      c.walk_TS = b.TS.walked_in; c.walk_DW = b.DW.walked_in
     }
 
-    const otpTotals = {
-      TS: otp.totals?.TS?.otps || 0, DW: otp.totals?.DW?.otps || 0,
-    }
-    const punch = {
-      TS: otp.totals?.TS?.walked_in || 0, DW: otp.totals?.DW?.walked_in || 0,
-      no_otp: otp.no_otp?.walked_in || 0,
-    }
-    otpTotals.total = otpTotals.TS + otpTotals.DW
-    punch.total = punch.TS + punch.DW + punch.no_otp
-
-    // ── Jarvis footfall (camera branches), only for allowed accounts ──
-    let jarvis = { available: false }
+    // ── Jarvis footfall by branch (Sunday-excluded), only for allowed accounts ──
+    let jarvisAvailable = false, tableMissing = false
     if (jarvisOk) {
-      let footfall = [], tableMissing = false
+      let footfall = []
       try {
         footfall = await selectAllRows(() => supabase.from('jarvis_footfall')
           .select('*').gte('footfall_date', from).lte('footfall_date', to)
@@ -99,7 +94,6 @@ export async function GET(req) {
       const newRows = await newCrmWalkins(from, to).catch(() => null)
       let rows = mergeFootfallRows({ branches: branchMeta || [], footfall, newRows, from, to, allowedRegions })
 
-      // Apply the dashboard's location filter to the camera rows.
       if (filter) {
         const resolve = buildBranchResolver(branchMeta || [])
         const metaByDisplay = new Map()
@@ -111,27 +105,29 @@ export async function GET(req) {
         })
       }
 
-      let group = 0, unique = 0
-      const cameraBranches = new Set()
+      jarvisAvailable = !tableMissing
       for (const r of rows) {
-        if (r.footfall == null) continue
-        unique += Number(r.footfall) || 0
-        group += Number(r.group) || 0
-        cameraBranches.add(r.branch)
-        const c = dayCell(r.date)
-        c.jarvis_footfall += Number(r.footfall) || 0
+        if (r.footfall == null || isSunday(r.date)) continue
+        const c = bcell(r.branch, r.region)
         c.jarvis_group += Number(r.group) || 0
+        c.jarvis_unique += Number(r.footfall) || 0
       }
-      jarvis = { available: true, tableMissing, group, footfall: unique, cameraBranches: cameraBranches.size }
     }
 
-    const data = {
-      from, to, filter,
-      jarvis,
-      otp: otpTotals,
-      punch,
-      days: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)),
+    // ── Group branches under their region, with per-region + grand totals ──
+    const KEYS = ['jarvis_group', 'jarvis_unique', 'otp_TS', 'otp_DW', 'walk_TS', 'walk_DW']
+    const regionMap = new Map()
+    const total = { jarvis_group: 0, jarvis_unique: 0, otp_TS: 0, otp_DW: 0, walk_TS: 0, walk_DW: 0 }
+    for (const c of branchMap.values()) {
+      const r = regionMap.get(c.region) || regionMap.set(c.region, { region: c.region, jarvis_group: 0, jarvis_unique: 0, otp_TS: 0, otp_DW: 0, walk_TS: 0, walk_DW: 0, branches: [] }).get(c.region)
+      for (const k of KEYS) { r[k] += c[k]; total[k] += c[k] }
+      r.branches.push(c)
     }
+    const activity = (x) => x.otp_TS + x.otp_DW + x.walk_TS + x.walk_DW + x.jarvis_group
+    const regions = [...regionMap.values()].sort((a, b) => activity(b) - activity(a))
+    for (const r of regions) r.branches.sort((a, b) => activity(b) - activity(a))
+
+    const data = { from, to, filter, jarvisAvailable, regions, total, no_otp: otp.no_otp?.walked_in || 0 }
     cache.set(key, { data, ts: Date.now() })
     if (cache.size > 60) cache.delete(cache.keys().next().value)
     return Response.json(data)

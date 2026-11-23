@@ -1,15 +1,15 @@
 'use client'
 
-// Dashboard section: the day's walk-in funnel in one place —
-//   Jarvis store footfall  →  OTPs generated (Telesales / Direct Walk-in)
-//   →  CRM punch-ins (walk-ins, by channel)  +  the attribution between stages.
-// One shared date filter (defaults to yesterday, because Jarvis camera counts
-// are only complete through yesterday) drives the funnel and the two expandable
-// detail panels below (the full Telesales-vs-Direct-Walk-in breakdown and the
-// Jarvis footfall-by-branch table). Follows the dashboard's location filter.
+// Dashboard section: the walk-in journey funnel as one table —
+//   Jarvis walk-in  →  OTP generated (Telesales / Direct)  →  CRM walk-ins (Telesales / Direct)
+// as columns, with regions as rows and every branch nested under its region.
+// Sundays are excluded (branches closed). One shared date filter (defaults to
+// yesterday, because Jarvis camera counts are only complete through yesterday)
+// drives the table and the two expandable detail panels below. Follows the
+// dashboard's location filter and has its own region + branch filters.
 // Data: /api/walkin-funnel (lib/otpChannels + lib/jarvisFootfallData).
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { authedFetch } from '../../lib/authedFetch'
 import { istNow, istStr, istLastWeekRange } from '../../lib/dateIst'
 import OtpChannelsSection from './OtpChannelsSection'
@@ -22,6 +22,7 @@ const PERIODS = [
   { key: 'mtd', label: 'MTD' }, { key: 'custom', label: 'Custom' },
 ]
 const FILTER_LABEL = { region: 'Region', state: 'State', cluster: 'Cluster', branch: 'Branch' }
+const KEYS = ['jarvis_group', 'jarvis_unique', 'otp_TS', 'otp_DW', 'walk_TS', 'walk_DW']
 
 // Ranges never start before 1 Oct 2026 and never end after yesterday (Jarvis).
 function rangeFor(key, custom) {
@@ -41,13 +42,16 @@ function rangeFor(key, custom) {
 }
 
 const fmtN = (n) => (n == null ? '—' : Number(n).toLocaleString('en-IN'))
-const fmtPctR = (p) => (p == null ? '—' : `${Math.round(p * 100)}%`)
+const sumCells = (list) => { const o = Object.fromEntries(KEYS.map(k => [k, 0])); for (const x of list) for (const k of KEYS) o[k] += x[k] || 0; return o }
 
 export default function WalkinAnalysisSection({ t, isMobile, filterType = null, filterValue = null }) {
   const [open, setOpen] = useState(true)
   const [period, setPeriod] = useState('yesterday')
   const [custom, setCustom] = useState(() => { const yday = istStr(new Date(istNow() - 86400000)); return { from: yday, to: yday } })
   const [state, setState] = useState({ loading: true, data: null, error: null })
+  const [regionSel, setRegionSel] = useState(null)
+  const [branchSel, setBranchSel] = useState(null)
+  const [collapsed, setCollapsed] = useState(() => new Set())   // regions in here are collapsed; default all expanded
   const [showOtp, setShowOtp] = useState(false)
   const [showJarvis, setShowJarvis] = useState(false)
   const loc = filterType && filterValue ? { type: filterType, value: filterValue } : null
@@ -67,16 +71,45 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
   useEffect(() => { if (open) load() }, [open, load])
 
   const d = state.data
-  const C = { TS: t.blue, DW: t.gold, jarvis: t.blue, otp: t.purple || t.blue, punch: t.green || t.gold }
+  const jarvis = !!d?.jarvisAvailable
+  const C = { TS: t.blue, DW: t.gold }
+
+  const allBranches = useMemo(() => {
+    if (!d) return []
+    const names = new Set()
+    for (const r of d.regions) { if (regionSel && r.region !== regionSel) continue; for (const b of r.branches) names.add(b.branch) }
+    return [...names].sort()
+  }, [d, regionSel])
+
+  // Apply the section's own region + branch filters; region subtotals follow the visible branches.
+  const view = useMemo(() => {
+    if (!d) return []
+    let regs = d.regions
+    if (regionSel) regs = regs.filter(r => r.region === regionSel)
+    if (branchSel) regs = regs.map(r => ({ ...r, branches: r.branches.filter(b => b.branch === branchSel) })).filter(r => r.branches.length)
+    return regs.map(r => ({ region: r.region, branches: r.branches, ...sumCells(r.branches) }))
+  }, [d, regionSel, branchSel])
+
+  const grand = useMemo(() => sumCells(view.flatMap(r => r.branches)), [view])
+  const empty = d && !KEYS.some(k => grand[k] > 0)
 
   const pill = (active) => ({
     padding: '5px 12px', borderRadius: 20, border: `1px solid ${active ? t.gold + '80' : t.border}`,
     background: active ? `${t.gold}20` : 'transparent', color: active ? t.gold : t.text3,
     fontSize: 11.5, fontWeight: active ? 700 : 500, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
   })
+  const th = { padding: '8px 10px', textAlign: 'right', fontSize: 10.5, color: t.text3, textTransform: 'uppercase', letterSpacing: '.04em', fontWeight: 700, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap', background: t.card, position: 'sticky', top: 0 }
+  const td = { padding: '7px 10px', fontSize: 12.5, color: t.text2, borderBottom: `1px solid ${t.border}`, textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
+  const ncols = 1 + (jarvis ? 1 : 0) + 4
 
-  // Conversion between consecutive stages.
-  const conv = (a, b) => (a > 0 ? b / a : null)
+  const jcell = (x) => jarvis ? <td style={{ ...td, color: t.blue }}>{fmtN(x.jarvis_group)}{x.jarvis_unique ? <span style={{ color: t.text4, fontSize: 11, marginLeft: 4 }}>/ {fmtN(x.jarvis_unique)}</span> : null}</td> : null
+  const dataCells = (x) => <>
+    {jcell(x)}
+    <td style={{ ...td, color: C.TS }}>{fmtN(x.otp_TS)}</td>
+    <td style={{ ...td, color: C.DW }}>{fmtN(x.otp_DW)}</td>
+    <td style={{ ...td, color: C.TS }}>{fmtN(x.walk_TS)}</td>
+    <td style={{ ...td, color: C.DW }}>{fmtN(x.walk_DW)}</td>
+  </>
 
   const detailBox = (shown, setShown, label, color, child) => (
     <div style={{ marginTop: 12, background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden' }}>
@@ -95,14 +128,14 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
         <div style={{ width: 3, height: 20, borderRadius: 2, background: `linear-gradient(180deg,${t.blue},${t.gold})`, flexShrink: 0 }} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: isMobile ? 12.5 : 14, color: t.text2, letterSpacing: isMobile ? '.08em' : '.12em', textTransform: 'uppercase', fontWeight: 700 }}>Walk-in Analysis</div>
-          {open && <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>Jarvis footfall → OTPs (Telesales / Direct) → CRM punch-ins, with attribution · defaults to yesterday</div>}
+          {open && <div style={{ fontSize: 11, color: t.text3, marginTop: 2 }}>Jarvis walk-in → OTP (Telesales / Direct) → CRM walk-ins, by region &amp; branch · Sundays excluded · defaults to yesterday</div>}
         </div>
         <div style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, background: `${t.gold}12`, border: `1px solid ${t.gold}28`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.gold, fontSize: 11, transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .3s' }}>▼</div>
       </div>
 
       {open && (
         <div style={{ padding: isMobile ? '14px' : '18px 24px 22px' }}>
-          <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', marginBottom: 14, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', marginBottom: 10, alignItems: 'center' }}>
             {PERIODS.map(p => <button key={p.key} onClick={() => setPeriod(p.key)} style={pill(period === p.key)}>{p.label}</button>)}
             {period === 'custom' ? (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 6, flexShrink: 0 }}>
@@ -121,94 +154,99 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
             {loc && <span style={{ fontSize: 11.5, color: t.gold, marginLeft: 6, whiteSpace: 'nowrap', flexShrink: 0 }}>· {FILTER_LABEL[loc.type]}: {loc.value}</span>}
           </div>
 
+          {/* Section region + branch filters */}
+          {d && (
+            <div style={{ display: 'flex', gap: 5, overflowX: 'auto', scrollbarWidth: 'none', marginBottom: 14, alignItems: 'center' }}>
+              <button onClick={() => { setRegionSel(null); setBranchSel(null) }} style={pill(!regionSel)}>All regions</button>
+              {d.regions.map(r => <button key={r.region} onClick={() => { setRegionSel(r.region); setBranchSel(null) }} style={pill(regionSel === r.region)}>{r.region}</button>)}
+              <select value={branchSel || ''} onChange={e => setBranchSel(e.target.value || null)} style={{ marginLeft: 6, background: t.card, color: t.text2, border: `1px solid ${t.border}`, borderRadius: 8, padding: '5px 8px', fontSize: 12, flexShrink: 0 }}>
+                <option value="">All branches</option>
+                {allBranches.map(b => <option key={b} value={b}>{b}</option>)}
+              </select>
+            </div>
+          )}
+
           {state.error && !d && <div style={{ fontSize: 13, color: t.red }}>Couldn&apos;t load: {state.error}</div>}
           {!d && state.loading && <div style={{ fontSize: 13, color: t.text3 }}>Loading…</div>}
 
-          {d && (() => {
-            const empty = !d.otp.total && !d.punch.total && !(d.jarvis?.group || 0) && !(d.jarvis?.footfall || 0)
-            return (
+          {d && (
             <div style={{ opacity: state.loading ? 0.6 : 1, transition: 'opacity .2s' }}>
-              {empty && (
+              {empty ? (
                 <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, padding: '18px', fontSize: 13, color: t.text3, textAlign: 'center' }}>
-                  No walk-in activity recorded for {from === to ? from : `${from} → ${to}`} — branches may have been closed that day. Pick another day above.
+                  No walk-in activity for {from === to ? from : `${from} → ${to}`} (Sundays excluded) — branches may have been closed. Pick another day above.
                 </div>
-              )}
-              {!empty && (() => {
-                const g = d.jarvis?.available ? d.jarvis.group : null
-                const rows = [
-                  d.jarvis?.available && { key: 'jarvis', color: C.jarvis, stage: 'Jarvis walk-ins', sub: 'store footfall', count: d.jarvis.group, extra: `${fmtN(d.jarvis.footfall)} unique`, ts: null, dw: null, ofFoot: g ? 1 : null, step: null },
-                  { key: 'otp', color: C.otp, stage: 'OTPs generated', sub: 'Telesales + Direct Walk-in', count: d.otp.total, ts: d.otp.TS, dw: d.otp.DW, ofFoot: g ? d.otp.total / g : null, step: g ? d.otp.total / g : null, stepOf: 'of footfall' },
-                  { key: 'punch', color: C.punch, stage: 'CRM punch-ins', sub: 'walk-ins created', count: d.punch.total, ts: d.punch.TS, dw: d.punch.DW, ofFoot: g ? d.punch.total / g : null, step: d.otp.total ? d.punch.total / d.otp.total : null, stepOf: 'of OTPs' },
-                ].filter(Boolean)
-                const maxCount = Math.max(1, ...rows.map(r => r.count || 0))
-                const th = { padding: '9px 10px', textAlign: 'right', fontSize: 10.5, color: t.text3, textTransform: 'uppercase', letterSpacing: '.05em', fontWeight: 700, borderBottom: `1px solid ${t.border}`, whiteSpace: 'nowrap' }
-                const td = { padding: '10px', fontSize: 13, color: t.text2, borderBottom: `1px solid ${t.border}`, textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }
-                const tsRate = conv(d.otp.TS, d.punch.TS), dwRate = conv(d.otp.DW, d.punch.DW)
-                return (
-                <>
+              ) : (
                 <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden' }}>
                   <div style={{ overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
                         <tr>
-                          <th style={{ ...th, textAlign: 'left' }}>Journey stage</th>
-                          <th style={th}>Count</th>
-                          <th style={{ ...th, color: C.TS }}>Telesales</th>
-                          <th style={{ ...th, color: C.DW }}>Direct Walk-in</th>
-                          {g != null && <th style={th}>% of footfall</th>}
-                          <th style={th}>Step conversion</th>
+                          <th rowSpan={2} style={{ ...th, textAlign: 'left' }}>Region / Branch</th>
+                          {jarvis && <th rowSpan={2} style={th}>Jarvis walk-in<div style={{ fontSize: 9, color: t.text4, fontWeight: 500 }}>group / unique</div></th>}
+                          <th colSpan={2} style={{ ...th, textAlign: 'center', borderLeft: `1px solid ${t.border}` }}>OTP generated</th>
+                          <th colSpan={2} style={{ ...th, textAlign: 'center', borderLeft: `1px solid ${t.border}` }}>CRM walk-ins</th>
+                        </tr>
+                        <tr>
+                          <th style={{ ...th, color: C.TS, borderLeft: `1px solid ${t.border}` }}>Telesales</th>
+                          <th style={{ ...th, color: C.DW }}>Direct</th>
+                          <th style={{ ...th, color: C.TS, borderLeft: `1px solid ${t.border}` }}>Telesales</th>
+                          <th style={{ ...th, color: C.DW }}>Direct</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {rows.map((r, i) => (
-                          <tr key={r.key}>
-                            <td style={{ ...td, textAlign: 'left' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <span style={{ width: 3, height: 26, borderRadius: 2, background: r.color, flexShrink: 0 }} />
-                                <span>
-                                  <span style={{ color: t.text1, fontWeight: 700 }}>{i + 1}. {r.stage}</span>
-                                  <span style={{ display: 'block', color: t.text4, fontSize: 11 }}>{r.sub}</span>
-                                </span>
-                              </div>
-                            </td>
-                            <td style={td}>
-                              <span style={{ fontSize: 15, fontWeight: 700, color: t.text1 }}>{fmtN(r.count)}</span>
-                              {r.extra && <span style={{ color: t.text4, fontSize: 11, marginLeft: 5 }}>+ {r.extra}</span>}
-                              <div style={{ height: 5, borderRadius: 3, background: t.border, overflow: 'hidden', marginTop: 5 }}>
-                                <div style={{ width: `${Math.max(2, (r.count / maxCount) * 100)}%`, height: '100%', background: r.color, borderRadius: 3 }} />
-                              </div>
-                            </td>
-                            <td style={{ ...td, color: r.ts == null ? t.text4 : C.TS }}>{r.ts == null ? '—' : fmtN(r.ts)}</td>
-                            <td style={{ ...td, color: r.dw == null ? t.text4 : C.DW }}>{r.dw == null ? '—' : fmtN(r.dw)}</td>
-                            {g != null && <td style={td}>{r.ofFoot == null ? '—' : fmtPctR(r.ofFoot)}</td>}
-                            <td style={{ ...td, color: r.step == null ? t.text4 : t.text1, fontWeight: r.step == null ? 400 : 700 }}>
-                              {r.step == null ? '—' : <>{fmtPctR(r.step)} <span style={{ color: t.text4, fontSize: 11, fontWeight: 400 }}>{r.stepOf}</span></>}
-                            </td>
-                          </tr>
-                        ))}
+                        {/* Grand total */}
+                        <tr style={{ background: `${t.gold}0c` }}>
+                          <td style={{ ...td, textAlign: 'left', color: t.text1, fontWeight: 800 }}>All regions</td>
+                          {dataCells(grand)}
+                        </tr>
+                        {view.map(r => {
+                          const show = !collapsed.has(r.region)
+                          return (
+                            <RegionGroup key={r.region} r={r} show={show}
+                              toggle={() => setCollapsed(s => { const n = new Set(s); n.has(r.region) ? n.delete(r.region) : n.add(r.region); return n })}
+                              t={t} td={td} jarvis={jarvis} C={C} dataCells={dataCells} jcell={jcell} isMobile={isMobile} />
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
-                  <div style={{ padding: '10px 14px', borderTop: `1px solid ${t.border}`, fontSize: 11.5, color: t.text3, display: 'flex', flexWrap: 'wrap', gap: 14 }}>
-                    <span>OTP → walk-in by channel: <b style={{ color: C.TS }}>Telesales {fmtPctR(tsRate)}</b> · <b style={{ color: C.DW }}>Direct Walk-in {fmtPctR(dwRate)}</b></span>
-                    {d.punch.no_otp > 0 && <span style={{ color: t.text4 }}>· {fmtN(d.punch.no_otp)} walk-ins had no OTP</span>}
-                    {g == null && <span style={{ color: t.text4 }}>· Jarvis footfall not available for your account</span>}
+                  <div style={{ padding: '9px 14px', borderTop: `1px solid ${t.border}`, fontSize: 11.5, color: t.text3, display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+                    <span>Click a region to collapse its branches.</span>
+                    {d.no_otp > 0 && <span style={{ color: t.text4 }}>· {fmtN(d.no_otp)} CRM walk-ins had no OTP (not in Telesales/Direct)</span>}
+                    {!jarvis && <span style={{ color: t.text4 }}>· Jarvis footfall not available for your account</span>}
                   </div>
                 </div>
-                </>
-                )
-              })()}
+              )}
 
               {/* ── Expandable detail (shared date) ── */}
               {detailBox(showOtp, setShowOtp, 'Telesales vs Direct Walk-in — full breakdown', t.gold,
                 <OtpChannelsSection t={t} isMobile={isMobile} embedded fromTo={{ from, to }} filterType={filterType} filterValue={filterValue} />)}
-              {d.jarvis?.available && detailBox(showJarvis, setShowJarvis, 'Jarvis footfall — by branch', t.blue,
+              {jarvis && detailBox(showJarvis, setShowJarvis, 'Jarvis footfall — by branch', t.blue,
                 <JarvisFootfallSection t={t} isMobile={isMobile} embedded fromTo={{ from, to }} />)}
             </div>
-            )
-          })()}
+          )}
         </div>
       )}
     </div>
+  )
+}
+
+function RegionGroup({ r, show, toggle, t, td, jarvis, C, dataCells, jcell, isMobile }) {
+  return (
+    <>
+      <tr onClick={toggle} style={{ cursor: 'pointer', background: t.card2 || t.card }}>
+        <td style={{ ...td, textAlign: 'left', color: t.text1, fontWeight: 700 }}>
+          <span style={{ display: 'inline-block', width: 12, color: t.text3, fontSize: 10 }}>{show ? '▾' : '▸'}</span>
+          {r.region} <span style={{ color: t.text4, fontWeight: 400, fontSize: 11 }}>· {r.branches.length}</span>
+        </td>
+        {dataCells(r)}
+      </tr>
+      {show && r.branches.map(b => (
+        <tr key={b.branch}>
+          <td style={{ ...td, textAlign: 'left', color: t.text2, paddingLeft: 28 }}>{b.branch}</td>
+          {dataCells(b)}
+        </tr>
+      ))}
+    </>
   )
 }
