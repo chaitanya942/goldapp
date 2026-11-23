@@ -21,7 +21,6 @@ import TodaysBookingsWidget from './TodaysBookingsWidget'
 import LiveFeedFlashcards from './LiveFeedFlashcards'
 import MonthProjection from './MonthProjection'
 import BusinessCalendarInsight from './BusinessCalendarInsight'
-import JarvisFootfallCard from './JarvisFootfallCard'
 import WalkinAnalysisSection from './WalkinAnalysisSection'
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
@@ -1191,13 +1190,6 @@ export default function DynamicDashboard() {
             onClick: () => setActiveNav('purchase-live'),
           } : null}
         />
-      )}
-
-      {/* ── Store footfall vs CRM walk-ins (Jarvis cameras) ── */}
-      {canSeeJarvis(userProfile?.role, userProfile?.email) && (
-        <div style={{ marginTop: 14 }}>
-          <JarvisFootfallCard t={t} isMobile={isMobile} />
-        </div>
       )}
 
       {/* ── Purchase ── */}

@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useApp, useRegionAccess } from '../../lib/context'
-import { canSeeJarvis } from '../../lib/jarvisAccess'
 import LiveTicker from '../ui/LiveTicker'
 import { getVisibleModules } from '../../lib/modules'
 import { authedFetch } from '../../lib/authedFetch'
@@ -16,7 +15,6 @@ import LiveFeedFlashcards from './LiveFeedFlashcards'
 import MonthProjection from './MonthProjection'
 import TodaysBookingsWidget from './TodaysBookingsWidget'
 import BusinessCalendarInsight from './BusinessCalendarInsight'
-import JarvisFootfallCard from './JarvisFootfallCard'
 import WalkinAnalysisSection from './WalkinAnalysisSection'
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
@@ -1484,13 +1482,6 @@ export default function DashboardHome() {
               onClick: () => setActiveNav('purchase-live'),
             } : null}
           />
-        </div>
-      )}
-
-      {/* ── STORE FOOTFALL vs CRM WALK-INS (Jarvis cameras) ── */}
-      {canSeeJarvis(userProfile?.role, userProfile?.email) && (
-        <div style={{ marginTop: 14 }}>
-          <JarvisFootfallCard t={t} isMobile={isMobile} />
         </div>
       )}
 
