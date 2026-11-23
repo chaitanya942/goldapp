@@ -103,8 +103,8 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
     background: active ? `${t.gold}20` : 'transparent', color: active ? t.gold : t.text3,
     fontSize: 11.5, fontWeight: active ? 700 : 500, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
   })
-  const th = { padding: isMobile ? '6px 3px' : '8px 10px', textAlign: 'right', fontSize: isMobile ? 9 : 10.5, color: t.text3, textTransform: 'uppercase', letterSpacing: isMobile ? 0 : '.04em', fontWeight: 700, borderBottom: `1px solid ${t.border}`, whiteSpace: isMobile ? 'normal' : 'nowrap', background: t.card, position: 'sticky', top: 0 }
-  const td = { padding: isMobile ? '6px 3px' : '7px 10px', fontSize: isMobile ? 11.5 : 12.5, color: t.text2, borderBottom: `1px solid ${t.border}`, textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: isMobile ? 'normal' : 'nowrap', overflowWrap: 'break-word' }
+  const th = { padding: isMobile ? '6px 2px' : '8px 10px', textAlign: isMobile ? 'center' : 'right', fontSize: isMobile ? 9 : 10.5, color: t.text3, textTransform: 'uppercase', letterSpacing: isMobile ? 0 : '.04em', fontWeight: 700, borderBottom: `1px solid ${t.border}`, whiteSpace: isMobile ? 'normal' : 'nowrap', background: t.card, position: 'sticky', top: 0 }
+  const td = { padding: isMobile ? '6px 2px' : '7px 10px', fontSize: isMobile ? 11.5 : 12.5, color: t.text2, borderBottom: `1px solid ${t.border}`, textAlign: isMobile ? 'center' : 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: isMobile ? 'normal' : 'nowrap', overflowWrap: 'break-word' }
   const ncols = 1 + (jarvis ? 1 : 0) + 4
 
   // Each cell: count on top, its % underneath. OTP % is of Jarvis footfall;
@@ -188,7 +188,7 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
                 <WalkinSankey t={t} isMobile={isMobile} jarvis={jarvis} cells={view.flatMap(r => r.branches)} />
                 <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden' }}>
                   <div style={{ overflowX: isMobile ? 'visible' : 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: isMobile ? 'fixed' : 'auto' }}>
+                    <table style={{ width: isMobile ? 'calc(100% - 12px)' : '100%', margin: isMobile ? '0 6px' : 0, borderCollapse: 'collapse', tableLayout: isMobile ? 'fixed' : 'auto' }}>
                       {isMobile && (
                         <colgroup>
                           <col style={{ width: jarvis ? '33%' : '38%' }} />
