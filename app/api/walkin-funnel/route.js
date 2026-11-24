@@ -71,12 +71,13 @@ export async function GET(req) {
     const branchMap = new Map()
     const bcell = (name, region) => branchMap.get(name) || branchMap.set(name, {
       branch: name, region: region || 'Unassigned',
-      jarvis_group: 0, jarvis_unique: 0, otp_TS: 0, otp_DW: 0, walk_TS: 0, walk_DW: 0,
+      jarvis_group: 0, jarvis_unique: 0, otp_TS: 0, otp_DW: 0, walk_TS: 0, walk_DW: 0, calls: 0,
     }).get(name)
     for (const b of otp.branches || []) {
       const c = bcell(b.branch, b.region)
       c.otp_TS = b.TS.otps; c.otp_DW = b.DW.otps
       c.walk_TS = b.TS.walked_in; c.walk_DW = b.DW.walked_in
+      c.calls = b.TS.calls || 0
     }
 
     // ── Jarvis footfall by branch (Sunday-excluded), only for allowed accounts ──
@@ -115,15 +116,15 @@ export async function GET(req) {
     }
 
     // ── Group branches under their region, with per-region + grand totals ──
-    const KEYS = ['jarvis_group', 'jarvis_unique', 'otp_TS', 'otp_DW', 'walk_TS', 'walk_DW']
+    const KEYS = ['jarvis_group', 'jarvis_unique', 'otp_TS', 'otp_DW', 'walk_TS', 'walk_DW', 'calls']
     const regionMap = new Map()
-    const total = { jarvis_group: 0, jarvis_unique: 0, otp_TS: 0, otp_DW: 0, walk_TS: 0, walk_DW: 0 }
+    const total = { jarvis_group: 0, jarvis_unique: 0, otp_TS: 0, otp_DW: 0, walk_TS: 0, walk_DW: 0, calls: 0 }
     // Rows that still have no region (no branch anywhere in the CRM for that
     // OTP) can't be placed; they're reported as a count, not as a fake region.
-    const unplaced = { otp_TS: 0, otp_DW: 0, walk_TS: 0, walk_DW: 0, jarvis_group: 0 }
+    const unplaced = { otp_TS: 0, otp_DW: 0, walk_TS: 0, walk_DW: 0, jarvis_group: 0, calls: 0 }
     for (const c of branchMap.values()) {
       if (c.region === 'Unassigned') { for (const k of Object.keys(unplaced)) unplaced[k] += c[k] || 0; continue }
-      const r = regionMap.get(c.region) || regionMap.set(c.region, { region: c.region, jarvis_group: 0, jarvis_unique: 0, otp_TS: 0, otp_DW: 0, walk_TS: 0, walk_DW: 0, branches: [] }).get(c.region)
+      const r = regionMap.get(c.region) || regionMap.set(c.region, { region: c.region, jarvis_group: 0, jarvis_unique: 0, otp_TS: 0, otp_DW: 0, walk_TS: 0, walk_DW: 0, calls: 0, branches: [] }).get(c.region)
       for (const k of KEYS) { r[k] += c[k]; total[k] += c[k] }
       r.branches.push(c)
     }

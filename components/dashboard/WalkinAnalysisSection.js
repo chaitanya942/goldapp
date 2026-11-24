@@ -21,7 +21,7 @@ const PERIODS = [
   { key: 'mtd', label: 'MTD' }, { key: 'custom', label: 'Custom' },
 ]
 const FILTER_LABEL = { region: 'Region', state: 'State', cluster: 'Cluster', branch: 'Branch' }
-const KEYS = ['jarvis_group', 'jarvis_unique', 'otp_TS', 'otp_DW', 'walk_TS', 'walk_DW']
+const KEYS = ['jarvis_group', 'jarvis_unique', 'otp_TS', 'otp_DW', 'walk_TS', 'walk_DW', 'calls']
 
 // Last working day: yesterday, or Saturday when yesterday was a Sunday (branches closed).
 function lastWorkingDay(now = istNow()) {
@@ -187,7 +187,8 @@ export default function WalkinAnalysisSection({ t, isMobile, filterType = null, 
                 </div>
               ) : (
                 <>
-                <WalkinSankey t={t} isMobile={isMobile} jarvis={jarvis} cells={view.flatMap(r => r.branches)} />
+                <WalkinSankey t={t} isMobile={isMobile} jarvis={jarvis} cells={view.flatMap(r => r.branches)}
+                  extraCalls={!regionSel && !branchSel ? (d.unplaced?.calls || 0) : 0} />
                 <div style={{ background: t.card, border: `1px solid ${t.border}`, borderRadius: 12, overflow: 'hidden' }}>
                   <div style={{ overflowX: isMobile ? 'visible' : 'auto' }}>
                     <table style={{ width: isMobile ? 'calc(100% - 12px)' : '100%', margin: isMobile ? '0 6px' : 0, borderCollapse: 'collapse', tableLayout: isMobile ? 'fixed' : 'auto' }}>

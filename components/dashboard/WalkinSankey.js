@@ -1,11 +1,11 @@
 'use client'
 
 // Animated Sankey for the walk-in journey:
-//   Leads (Telesales OTPs sent) → Jarvis walk-ins → CRM OTP → Telesales / Direct.
-// Leads who never came drop out as "Not visited"; footfall that never got an OTP
-// drops out as "No OTP". Only walk-ins are tied to Jarvis — a lead that walked in
-// at a branch Jarvis didn't count goes through "No camera" instead. Direct
-// customers have no lead, so part of the Jarvis box has no incoming flow.
+//   Leads (telesales calls) → Telesales OTP → Jarvis walk-ins → Telesales / Direct walk-in.
+// Drop-offs in red: calls with no OTP, OTPs that never visited, footfall that
+// never got an OTP. Direct customers walk in without a call, so they join at the
+// Jarvis box (which has more coming out than the Telesales flow going in).
+// Telesales walk-ins at branches Jarvis didn't count go through "No camera".
 //
 // `cells` = the visible branch rows of the Walk-in Analysis table
 // ({ jarvis_group, otp_TS, otp_DW, walk_TS, walk_DW }).
@@ -23,9 +23,10 @@ const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3)
 const fmtN = (n) => Math.round(n).toLocaleString('en-IN')
 const fmtP = (p) => (p > 0 && p < 0.005 ? '<1%' : `${Math.round(p * 100)}%`)
 
-function buildGraph(cells, jarvis) {
+function buildGraph(cells, jarvis, extraCalls = 0) {
   const sum = (f) => cells.reduce((s, c) => s + (f(c) || 0), 0)
-  const OTS = sum(c => c.otp_TS)                       // Telesales leads given an OTP
+  const CALLS = sum(c => c.calls) + (extraCalls || 0)  // telesales calls = leads
+  const OTS = sum(c => c.otp_TS)
   const WTS = sum(c => c.walk_TS), WDW = sum(c => c.walk_DW)
   const cam = cells.filter(c => (c.jarvis_group || 0) > 0)
   const J = jarvis ? sum(c => c.jarvis_group) : 0
@@ -33,46 +34,50 @@ function buildGraph(cells, jarvis) {
   const nodes = [], links = []
   const node = (id, col, label, short, value, kind) => { if (value > 0.0001) nodes.push({ id, col, label, short, value, kind }) }
   const link = (s, t, value) => { if (value > 0.0001) links.push({ s, t, value }) }
+  // Calls feed the Telesales OTP; if OTPs outnumber calls in a filtered view, the OTP box just has extra inflow.
+  const callToOtp = Math.min(CALLS, OTS)
+  const noOtpCall = Math.max(0, CALLS - OTS)
   const notVisited = Math.max(0, OTS - WTS)
-  const walkins = WTS + WDW                            // walk-ins punched with an OTP
 
-  node('leads', 0, 'Leads', 'Leads', OTS, 'lead')
+  node('calls', 0, 'Leads (calls)', 'Leads', CALLS, 'lead')
+  node('tsOtp', 1, 'Telesales OTP', 'TS OTP', OTS, 'otp')
+  node('noOtpCall', 1, 'No OTP from call', 'No OTP', noOtpCall, 'drop')
+  link('calls', 'tsOtp', callToOtp)
+  link('calls', 'noOtpCall', noOtpCall)
+
   if (jarvis && J > 0) {
     // Only walk-ins are tied to Jarvis: camera-branch Telesales walk-ins + Direct walk-ins.
     let inTS = cam.reduce((s, c) => s + (c.walk_TS || 0), 0)
     let inDW = cam.reduce((s, c) => s + (c.walk_DW || 0), 0)
     if (inTS + inDW > J) { const f = J / (inTS + inDW); inTS *= f; inDW *= f }
-    const noCam = Math.max(0, walkins - inTS - inDW)    // walk-ins at branches Jarvis didn't count
+    const noCamTS = Math.max(0, WTS - inTS)            // Telesales walk-ins Jarvis didn't count
     const noOtp = Math.max(0, J - inTS - inDW)
-    node('jarvis', 1, 'Jarvis walk-ins', 'Jarvis', J, 'base')
-    node('noCam', 1, 'No camera', 'No cam', noCam, 'ext')
-    node('notVisited', 1, 'Not visited', 'No visit', notVisited, 'drop')
-    node('crm', 2, 'CRM OTP', 'CRM OTP', walkins, 'otp')
-    node('noOtp', 2, 'No OTP', 'No OTP', noOtp, 'drop')
-    node('ts', 3, 'Telesales', 'TS', WTS, 'ts')
-    node('dw', 3, 'Direct', 'Direct', WDW, 'dw')
-    link('leads', 'jarvis', inTS)
-    link('leads', 'noCam', Math.max(0, WTS - inTS))
-    link('leads', 'notVisited', notVisited)
-    link('jarvis', 'crm', inTS + inDW)
+    node('jarvis', 2, 'Jarvis walk-ins', 'Jarvis', J, 'base')
+    node('noCam', 2, 'No camera', 'No cam', noCamTS, 'ext')
+    node('notVisited', 2, 'Not visited', 'No visit', notVisited, 'drop')
+    node('ts', 3, 'Telesales walk-in', 'TS walk-in', WTS, 'ts')
+    node('dw', 3, 'Direct walk-in', 'Direct', WDW, 'dw')
+    node('noOtp', 3, 'No OTP', 'No OTP', noOtp, 'drop')
+    link('tsOtp', 'jarvis', inTS)
+    link('tsOtp', 'noCam', noCamTS)
+    link('tsOtp', 'notVisited', notVisited)
+    link('jarvis', 'ts', inTS)
+    link('jarvis', 'dw', inDW)
     link('jarvis', 'noOtp', noOtp)
-    link('noCam', 'crm', noCam)
+    link('noCam', 'ts', noCamTS)
   } else {
-    node('notVisited', 1, 'Not visited', 'No visit', notVisited, 'drop')
-    node('crm', 1, 'CRM OTP', 'CRM OTP', walkins, 'otp')
-    node('ts', 2, 'Telesales', 'TS', WTS, 'ts')
-    node('dw', 2, 'Direct', 'Direct', WDW, 'dw')
-    link('leads', 'crm', WTS)
-    link('leads', 'notVisited', notVisited)
+    node('ts', 2, 'Telesales walk-in', 'TS walk-in', WTS, 'ts')
+    node('dw', 2, 'Direct walk-in', 'Direct', WDW, 'dw')
+    node('notVisited', 2, 'Not visited', 'No visit', notVisited, 'drop')
+    link('tsOtp', 'ts', Math.min(WTS, OTS))
+    link('tsOtp', 'notVisited', notVisited)
   }
-  link('crm', 'ts', WTS)
-  link('crm', 'dw', WDW)
 
-  const ORDER = ['leads', 'jarvis', 'noCam', 'crm', 'notVisited', 'noOtp', 'ts', 'dw']
+  const ORDER = ['calls', 'tsOtp', 'noOtpCall', 'jarvis', 'noCam', 'notVisited', 'ts', 'dw', 'noOtp']
   nodes.sort((a, b) => a.col - b.col || ORDER.indexOf(a.id) - ORDER.indexOf(b.id))
   const ids = new Set(nodes.map(n => n.id))
   const cols = Math.max(...nodes.map(n => n.col)) + 1
-  return { nodes, links: links.filter(l => ids.has(l.s) && ids.has(l.t)), cols, J, OTS, walkins }
+  return { nodes, links: links.filter(l => ids.has(l.s) && ids.has(l.t)), cols, J, CALLS, OTS, walkins: WTS + WDW }
 }
 
 function layout(g, W, H, isMobile) {
@@ -124,7 +129,7 @@ function layout(g, W, H, isMobile) {
   return { pos, links, height: Math.max(H, maxY), nodeW }
 }
 
-export default function WalkinSankey({ t, isMobile, cells, jarvis }) {
+export default function WalkinSankey({ t, isMobile, cells, jarvis, extraCalls = 0 }) {
   const wrapRef = useRef(null)
   const [W, setW] = useState(0)
   const [p, setP] = useState(0)
@@ -139,7 +144,7 @@ export default function WalkinSankey({ t, isMobile, cells, jarvis }) {
     return () => ro.disconnect()
   }, [])
 
-  const g = useMemo(() => buildGraph(cells || [], jarvis), [cells, jarvis])
+  const g = useMemo(() => buildGraph(cells || [], jarvis, extraCalls), [cells, jarvis, extraCalls])
   const sig = g.nodes.map(n => `${n.id}:${Math.round(n.value)}`).join('|')
 
   // Replay the reveal whenever the numbers change.
@@ -172,6 +177,7 @@ export default function WalkinSankey({ t, isMobile, cells, jarvis }) {
   }
   const kindOf = Object.fromEntries(g.nodes.map(n => [n.id, n.kind]))
   const pctOf = (n) => {
+    if (n.id === 'tsOtp' || n.id === 'noOtpCall') return g.CALLS ? n.value / g.CALLS : null
     if (n.id === 'notVisited') return g.OTS ? n.value / g.OTS : null
     if (n.id === 'noOtp') return g.J ? n.value / g.J : null
     if (n.id === 'ts' || n.id === 'dw') return g.walkins ? n.value / g.walkins : null
