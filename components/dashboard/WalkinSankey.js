@@ -1,10 +1,11 @@
 'use client'
 
-// Animated Sankey for the walk-in journey: Jarvis walk-ins → OTPs (Telesales /
-// Direct) → actual walk-ins, with drop-offs in red. Every flow balances: OTPs the
-// cameras never saw (Telesales OTPs sent before a visit, branches without a
-// camera) enter from a small "Outside Jarvis" source instead of being forced out
-// of the Jarvis count.
+// Animated Sankey for the walk-in journey:
+//   Leads (Telesales OTPs sent) → Jarvis walk-ins → CRM OTP → Telesales / Direct.
+// Leads who never came drop out as "Not visited"; footfall that never got an OTP
+// drops out as "No OTP". Only walk-ins are tied to Jarvis — a lead that walked in
+// at a branch Jarvis didn't count goes through "No camera" instead. Direct
+// customers have no lead, so part of the Jarvis box has no incoming flow.
 //
 // `cells` = the visible branch rows of the Walk-in Analysis table
 // ({ jarvis_group, otp_TS, otp_DW, walk_TS, walk_DW }).
@@ -24,7 +25,7 @@ const fmtP = (p) => (p > 0 && p < 0.005 ? '<1%' : `${Math.round(p * 100)}%`)
 
 function buildGraph(cells, jarvis) {
   const sum = (f) => cells.reduce((s, c) => s + (f(c) || 0), 0)
-  const OTS = sum(c => c.otp_TS), ODW = sum(c => c.otp_DW)
+  const OTS = sum(c => c.otp_TS)                       // Telesales leads given an OTP
   const WTS = sum(c => c.walk_TS), WDW = sum(c => c.walk_DW)
   const cam = cells.filter(c => (c.jarvis_group || 0) > 0)
   const J = jarvis ? sum(c => c.jarvis_group) : 0
@@ -32,41 +33,52 @@ function buildGraph(cells, jarvis) {
   const nodes = [], links = []
   const node = (id, col, label, short, value, kind) => { if (value > 0.0001) nodes.push({ id, col, label, short, value, kind }) }
   const link = (s, t, value) => { if (value > 0.0001) links.push({ s, t, value }) }
+  const notVisited = Math.max(0, OTS - WTS)
+  const walkins = WTS + WDW                            // walk-ins punched with an OTP
 
-  const off = jarvis && J > 0 ? 1 : 0
-  if (off) {
-    // People the cameras saw who carried an OTP: camera-branch Telesales walk-ins + Direct OTPs.
+  node('leads', 0, 'Leads', 'Leads', OTS, 'lead')
+  if (jarvis && J > 0) {
+    // Only walk-ins are tied to Jarvis: camera-branch Telesales walk-ins + Direct walk-ins.
     let inTS = cam.reduce((s, c) => s + (c.walk_TS || 0), 0)
-    let inDW = cam.reduce((s, c) => s + (c.otp_DW || 0), 0)
-    const inStore = inTS + inDW
-    if (inStore > J) { const f = J / inStore; inTS *= f; inDW *= f }
+    let inDW = cam.reduce((s, c) => s + (c.walk_DW || 0), 0)
+    if (inTS + inDW > J) { const f = J / (inTS + inDW); inTS *= f; inDW *= f }
+    const noCam = Math.max(0, walkins - inTS - inDW)    // walk-ins at branches Jarvis didn't count
     const noOtp = Math.max(0, J - inTS - inDW)
-    const extTS = Math.max(0, OTS - inTS), extDW = Math.max(0, ODW - inDW)
-    node('jarvis', 0, 'Jarvis walk-ins', 'Jarvis', J, 'base')
-    node('ext', 0, 'Outside Jarvis', 'Outside', extTS + extDW, 'ext')
-    link('jarvis', 'tsOtp', inTS); link('jarvis', 'dwOtp', inDW); link('jarvis', 'noOtp', noOtp)
-    link('ext', 'tsOtp', extTS); link('ext', 'dwOtp', extDW)
-    node('noOtp', 1, 'No OTP', 'No OTP', noOtp, 'drop')
+    node('jarvis', 1, 'Jarvis walk-ins', 'Jarvis', J, 'base')
+    node('noCam', 1, 'No camera', 'No cam', noCam, 'ext')
+    node('notVisited', 1, 'Not visited', 'No visit', notVisited, 'drop')
+    node('crm', 2, 'CRM OTP', 'CRM OTP', walkins, 'otp')
+    node('noOtp', 2, 'No OTP', 'No OTP', noOtp, 'drop')
+    node('ts', 3, 'Telesales', 'TS', WTS, 'ts')
+    node('dw', 3, 'Direct', 'Direct', WDW, 'dw')
+    link('leads', 'jarvis', inTS)
+    link('leads', 'noCam', Math.max(0, WTS - inTS))
+    link('leads', 'notVisited', notVisited)
+    link('jarvis', 'crm', inTS + inDW)
+    link('jarvis', 'noOtp', noOtp)
+    link('noCam', 'crm', noCam)
+  } else {
+    node('notVisited', 1, 'Not visited', 'No visit', notVisited, 'drop')
+    node('crm', 1, 'CRM OTP', 'CRM OTP', walkins, 'otp')
+    node('ts', 2, 'Telesales', 'TS', WTS, 'ts')
+    node('dw', 2, 'Direct', 'Direct', WDW, 'dw')
+    link('leads', 'crm', WTS)
+    link('leads', 'notVisited', notVisited)
   }
-  node('tsOtp', off, 'Telesales OTP', 'TS OTP', OTS, 'ts')
-  node('dwOtp', off, 'Direct OTP', 'Direct OTP', ODW, 'dw')
-  node('tsWalk', off + 1, 'Telesales walk-in', 'TS walk-in', WTS, 'ts')
-  node('dwWalk', off + 1, 'Direct walk-in', 'Direct walk-in', WDW, 'dw')
-  node('tsNoShow', off + 1, 'Telesales no-show', 'TS no-show', Math.max(0, OTS - WTS), 'drop')
-  node('dwDrop', off + 1, 'Direct not walked in', 'DW drop', Math.max(0, ODW - WDW), 'drop')
-  link('tsOtp', 'tsWalk', Math.min(WTS, OTS)); link('tsOtp', 'tsNoShow', Math.max(0, OTS - WTS))
-  link('dwOtp', 'dwWalk', Math.min(WDW, ODW)); link('dwOtp', 'dwDrop', Math.max(0, ODW - WDW))
+  link('crm', 'ts', WTS)
+  link('crm', 'dw', WDW)
 
-  // Column order top → bottom (drops last, like a funnel).
-  const ORDER = ['jarvis', 'ext', 'dwOtp', 'tsOtp', 'noOtp', 'dwWalk', 'tsWalk', 'tsNoShow', 'dwDrop']
+  const ORDER = ['leads', 'jarvis', 'noCam', 'crm', 'notVisited', 'noOtp', 'ts', 'dw']
   nodes.sort((a, b) => a.col - b.col || ORDER.indexOf(a.id) - ORDER.indexOf(b.id))
   const ids = new Set(nodes.map(n => n.id))
-  return { nodes, links: links.filter(l => ids.has(l.s) && ids.has(l.t)), cols: off + 2, J, OTS, ODW }
+  const cols = Math.max(...nodes.map(n => n.col)) + 1
+  return { nodes, links: links.filter(l => ids.has(l.s) && ids.has(l.t)), cols, J, OTS, walkins }
 }
 
 function layout(g, W, H, isMobile) {
   const cols = g.cols
-  const nodeW = Math.max(isMobile ? 74 : 110, Math.min(isMobile ? 96 : 168, W * (isMobile ? 0.25 : 0.16)))
+  const minGap = isMobile ? 22 : 80
+  const nodeW = Math.max(isMobile ? 56 : 96, Math.min(isMobile ? 96 : 168, (W - (cols - 1) * minGap) / cols, W * (isMobile ? 0.25 : 0.16)))
   const colGap = (W - cols * nodeW) / Math.max(1, cols - 1)
   const gap = isMobile ? 10 : 14, minH = isMobile ? 36 : 42
   const byCol = Array.from({ length: cols }, (_, c) => g.nodes.filter(n => n.col === c))
@@ -92,7 +104,12 @@ function layout(g, W, H, isMobile) {
   // Flows sit centred inside their node (nodes can be taller than their flows via minH).
   const outTot = {}, inTot = {}
   for (const l of g.links) { outTot[l.s] = (outTot[l.s] || 0) + l.value * k; inTot[l.t] = (inTot[l.t] || 0) + l.value * k }
-  for (const id in pos) { const p = pos[id]; p.outOff = (p.h - (outTot[id] || 0)) / 2; p.inOff = (p.h - (inTot[id] || 0)) / 2 }
+  const valOf = Object.fromEntries(g.nodes.map(n => [n.id, n.value * k]))
+  for (const id in pos) {
+    const p = pos[id], inT = inTot[id] || 0, outT = outTot[id] || 0
+    p.outOff = (p.h - outT) / 2
+    p.inOff = inT < valOf[id] - 0.5 ? 0 : (p.h - inT) / 2
+  }
   const orderOf = (id) => g.nodes.findIndex(n => n.id === id)
   const links = [...g.links]
     .sort((a, b) => orderOf(a.s) - orderOf(b.s) || orderOf(a.t) - orderOf(b.t))
@@ -145,7 +162,9 @@ export default function WalkinSankey({ t, isMobile, cells, jarvis }) {
   const L = W > 0 && g.nodes.length ? layout(g, W, H, isMobile) : null
 
   const C = {
+    lead: [t.purple || '#8c5ac8', '#4f2f80'],
     base: ['#4a5d95', '#26345e'],
+    otp: ['#2f9e8f', '#1d665c'],
     ext: [t.text4 || '#8a8a8a', t.text3 || '#6a6a6a'],
     ts: [t.blue || '#3a8fbf', '#22607f'],
     dw: [t.gold || '#c9a84c', '#9b7d2e'],
@@ -153,10 +172,9 @@ export default function WalkinSankey({ t, isMobile, cells, jarvis }) {
   }
   const kindOf = Object.fromEntries(g.nodes.map(n => [n.id, n.kind]))
   const pctOf = (n) => {
+    if (n.id === 'notVisited') return g.OTS ? n.value / g.OTS : null
     if (n.id === 'noOtp') return g.J ? n.value / g.J : null
-    if (n.id === 'tsWalk' || n.id === 'tsNoShow') return g.OTS ? n.value / g.OTS : null
-    if (n.id === 'dwWalk' || n.id === 'dwDrop') return g.ODW ? n.value / g.ODW : null
-    if ((n.id === 'tsOtp' || n.id === 'dwOtp') && g.J) return n.value / g.J
+    if (n.id === 'ts' || n.id === 'dw') return g.walkins ? n.value / g.walkins : null
     return null
   }
   const label = (n) => (isMobile ? n.short : n.label)
