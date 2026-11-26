@@ -844,7 +844,7 @@ export default function DashboardHome() {
   const COLOR_PALETTE = [t.gold, t.green, t.blue, t.purple, t.orange, t.red]
 
   const [period,         setPeriod]         = useState('today')
-  const [overviewOpen,   setOverviewOpen]   = useState(false)
+  const overviewOpen = true   // Purchase Overview is always expanded (no collapse toggle)
   const [consignOpen,    setConsignOpen]    = useState(false)
   const [salesOpen,      setSalesOpen]      = useState(false)
   const [filterType,     setFilterType]     = useState(null)
@@ -1489,10 +1489,9 @@ export default function DashboardHome() {
       {showPurchase && <div style={{ marginTop: 8, border:`1px solid ${t.border2}`, borderRadius:20, background:`linear-gradient(160deg,${t.card2},${t.card3})`, boxShadow:`${t.shadow},inset 0 1px 0 rgba(255,255,255,.03)`, position:'relative', overflow:'hidden', transition:'all .35s ease' }}>
         <div style={{ position:'absolute', top:0, left:0, width:160, height:160, background:`radial-gradient(circle at top left,${t.gold}08,transparent 70%)`, pointerEvents:'none' }}/>
 
-        {/* ── Clickable Header ── */}
+        {/* ── Header ── */}
         <div
-          onClick={() => setOverviewOpen(o => !o)}
-          style={{ display:'flex', alignItems:'center', gap: isMobile ? 8 : 14, padding: overviewOpen ? (isMobile ? '14px 16px' : '20px 24px') : (isMobile ? '10px 16px' : '12px 24px'), flexWrap:'wrap', position:'relative', zIndex:1, cursor:'pointer', userSelect:'none', borderBottom: overviewOpen ? `1px solid ${t.border}` : 'none', transition:'border .35s ease' }}
+          style={{ display:'flex', alignItems:'center', gap: isMobile ? 8 : 14, padding: overviewOpen ? (isMobile ? '14px 16px' : '20px 24px') : (isMobile ? '10px 16px' : '12px 24px'), flexWrap:'wrap', position:'relative', zIndex:1, borderBottom: overviewOpen ? `1px solid ${t.border}` : 'none', transition:'border .35s ease' }}
         >
           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
             <div style={{ width:3, height:20, borderRadius:2, background:`linear-gradient(180deg,${t.gold},${t.gold}40)`, boxShadow:`0 0 8px ${t.gold}60` }}/>
@@ -1518,11 +1517,6 @@ export default function DashboardHome() {
               {totalBranches} active branches · {Object.keys(regionCounts).length} regions
             </div>}
           </>}
-
-          {/* Chevron */}
-          <div style={{ marginLeft:'auto', width:28, height:28, borderRadius:8, background:`${t.gold}12`, border:`1px solid ${t.gold}28`, display:'flex', alignItems:'center', justifyContent:'center', color:t.gold, fontSize:11, transition:'transform .35s cubic-bezier(.4,0,.2,1)', transform: overviewOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }}>
-            ▼
-          </div>
         </div>
 
         {/* ── Collapsible body ── */}
