@@ -1,8 +1,8 @@
 'use client'
 
 // Animated Sankey for the walk-in journey:
-//   Leads (telesales calls) → Telesales OTP → Jarvis walk-ins → Telesales / Direct walk-in.
-// Drop-offs in red: calls with no OTP, OTPs that never visited, footfall that
+//   Leads (CRM leads created) → Telesales OTP → Jarvis walk-ins → Telesales / Direct walk-in.
+// Drop-offs in red: invalid leads (every valid lead gets an OTP), OTPs that never visited, footfall that
 // never got an OTP. Direct customers walk in without a call, so they join at the
 // Jarvis box (which has more coming out than the Telesales flow going in).
 // Telesales walk-ins at branches Jarvis didn't count go through "No camera".
@@ -25,7 +25,7 @@ const fmtP = (p) => (p > 0 && p < 0.005 ? '<1%' : `${Math.round(p * 100)}%`)
 
 function buildGraph(cells, jarvis, extraCalls = 0) {
   const sum = (f) => cells.reduce((s, c) => s + (f(c) || 0), 0)
-  const CALLS = sum(c => c.calls) + (extraCalls || 0)  // telesales calls = leads
+  const CALLS = sum(c => c.calls) + (extraCalls || 0)  // CRM leads created (field kept as `calls`)
   const OTS = sum(c => c.otp_TS)
   const WTS = sum(c => c.walk_TS), WDW = sum(c => c.walk_DW)
   const cam = cells.filter(c => (c.jarvis_group || 0) > 0)
@@ -39,9 +39,9 @@ function buildGraph(cells, jarvis, extraCalls = 0) {
   const noOtpCall = Math.max(0, CALLS - OTS)
   const notVisited = Math.max(0, OTS - WTS)
 
-  node('calls', 0, 'Leads (calls)', 'Leads', CALLS, 'lead')
+  node('calls', 0, 'Leads', 'Leads', CALLS, 'lead')
   node('tsOtp', 1, 'Telesales OTP', 'TS OTP', OTS, 'otp')
-  node('noOtpCall', 1, 'No OTP from call', 'No OTP', noOtpCall, 'drop')
+  node('noOtpCall', 1, 'Invalid leads', 'Invalid', noOtpCall, 'drop')
   link('calls', 'tsOtp', callToOtp)
   link('calls', 'noOtpCall', noOtpCall)
 
