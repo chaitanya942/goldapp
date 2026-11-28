@@ -5834,7 +5834,8 @@ export async function POST(req) {
   // ── Bangalore daily stock clear ───────────────────────────────────────────
   // Replaces the hand-run "Bangalore morning op" SQL. Bangalore bills never
   // ride a consignment (HO is in the same city): every approved bill still
-  // at a Bangalore-region branch with purchase_date in [from, to] goes
+  // HELD at a Bangalore-region branch (current_branch, else origin — so ROK
+  // bills transferred into a Bangalore hub count) with purchase_date in [from, to] goes
   // straight to at_ho, and for each (branch, billing day) that had bills moved
   // one status='seed' row is added so the branch's next tmp_prf advances by
   // one — one physical seal per branch per day, same as running the SQL once
@@ -5859,51 +5860,55 @@ export async function POST(req) {
     const codeOf = Object.fromEntries((brs || []).map(b => [b.name, b.branch_code]))
     const names  = Object.keys(codeOf)
 
-    const bills = []
-    for (let i = 0; i < names.length; i += 100) {
-      const slice = names.slice(i, i + 100)
-      for (let off = 0; ; off += 1000) {
-        const { data, error } = await supabase
-          .from('purchases')
-          .select('id, branch_name, purchase_date, net_weight, total_amount')
-          .in('branch_name', slice)
-          .eq('stock_status', 'at_branch').eq('is_deleted', false).eq('crm_status', 'approved')
-          .gte('purchase_date', from).lte('purchase_date', to)
-          .order('id')
-          .range(off, off + 999)
-        if (error) return Response.json({ error: error.message }, { status: 500 })
-        bills.push(...(data || []))
-        if (!data || data.length < 1000) break
+    // Bills HELD at a Bangalore branch — keyed on where the gold physically is
+    // (coalesce(current_branch, branch_name)), the same rule Branch Stock uses.
+    // So ROK bills transferred into a Bangalore hub (Yelahanka, Vajrahalli,
+    // K R Puram…) are cleared with it, and a Bangalore bill moved out to a
+    // non-Bangalore branch is not. Own bills must be CRM-approved; transferred-
+    // in bills are taken as-is (Branch Stock shows them either way).
+    const fetchHeld = async (applyDates, cols) => {
+      const byId = new Map()
+      const run = async (build) => {
+        for (let off = 0; ; off += 1000) {
+          const { data, error } = await applyDates(build()).order('id').range(off, off + 999)
+          if (error) throw new Error(error.message)
+          for (const r of data || []) byId.set(r.id, r)
+          if (!data || data.length < 1000) break
+        }
       }
+      const base = () => supabase.from('purchases').select(`id, branch_name, current_branch, crm_status, ${cols}`)
+        .eq('stock_status', 'at_branch').eq('is_deleted', false)
+      for (let i = 0; i < names.length; i += 100) {
+        const slice = names.slice(i, i + 100)
+        await run(() => base().in('current_branch', slice))
+        await run(() => base().is('current_branch', null).in('branch_name', slice))
+      }
+      return [...byId.values()]
+        .filter(r => (r.current_branch && r.current_branch !== r.branch_name) || r.crm_status === 'approved')
+        .map(r => ({ ...r, holder: r.current_branch || r.branch_name }))
     }
 
-    // Billing days before `from` still at a Bangalore branch — reported, not moved.
-    const olderByDate = {}
-    for (let i = 0; i < names.length; i += 100) {
-      for (let off = 0; ; off += 1000) {
-        const { data, error } = await supabase
-          .from('purchases')
-          .select('purchase_date')
-          .in('branch_name', names.slice(i, i + 100))
-          .eq('stock_status', 'at_branch').eq('is_deleted', false).eq('crm_status', 'approved')
-          .lt('purchase_date', from)
-          .order('id')
-          .range(off, off + 999)
-        if (error) return Response.json({ error: error.message }, { status: 500 })
-        for (const r of data || []) olderByDate[r.purchase_date] = (olderByDate[r.purchase_date] || 0) + 1
-        if (!data || data.length < 1000) break
-      }
+    let bills, olderRows
+    try {
+      bills     = await fetchHeld(q => q.gte('purchase_date', from).lte('purchase_date', to), 'purchase_date, net_weight, total_amount')
+      // Billing days before `from` still held at a Bangalore branch — reported, not moved.
+      olderRows = await fetchHeld(q => q.lt('purchase_date', from), 'purchase_date')
+    } catch (e) {
+      return Response.json({ error: e.message }, { status: 500 })
     }
+    const olderByDate = {}
+    for (const r of olderRows) olderByDate[r.purchase_date] = (olderByDate[r.purchase_date] || 0) + 1
     const older = Object.entries(olderByDate).sort().map(([d, n]) => ({ date: d, bills: n }))
 
-    // Preview summary per branch; the write works per (branch, billing day).
+    // Preview summary per holding branch; the write works per (branch, billing day).
     const byBranch = {}, byBranchDay = {}
     for (const b of bills) {
-      const g = byBranch[b.branch_name] || (byBranch[b.branch_name] = { branch_name: b.branch_name, bills: 0, days: new Set(), net_wt: 0, value: 0 })
+      const g = byBranch[b.holder] || (byBranch[b.holder] = { branch_name: b.holder, bills: 0, transferred_in: 0, days: new Set(), net_wt: 0, value: 0 })
       g.bills++; g.days.add(b.purchase_date)
+      if (b.holder !== b.branch_name) g.transferred_in++
       g.net_wt += Number(b.net_weight || 0); g.value += Number(b.total_amount || 0)
-      const key = `${b.branch_name}|${b.purchase_date}`
-      ;(byBranchDay[key] || (byBranchDay[key] = { branch_name: b.branch_name, day: b.purchase_date, ids: [] })).ids.push(b.id)
+      const key = `${b.holder}|${b.purchase_date}`
+      ;(byBranchDay[key] || (byBranchDay[key] = { branch_name: b.holder, day: b.purchase_date, ids: [] })).ids.push(b.id)
     }
     const summary = Object.values(byBranch).sort((a, b) => b.bills - a.bills)
       .map(g => ({ ...g, days: g.days.size, net_wt: Number(g.net_wt.toFixed(3)) }))

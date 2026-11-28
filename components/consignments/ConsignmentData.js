@@ -1336,7 +1336,7 @@ export default function ConsignmentData() {
         ? `\n\nNot included — earlier days still at branch: ${p.older.map(o => `${o.date} (${o.bills})`).join(', ')}.`
         : ''
       if (!p.bills) { setToast({ msg: `No Bangalore bills at branch for ${range}.${olderNote ? ` Earlier days pending: ${p.older.map(o => o.date).join(', ')}.` : ''}`, type: olderNote ? 'error' : 'success' }); return }
-      const lines = p.branches.slice(0, 12).map(b => `· ${b.branch_name}: ${b.bills} bill${b.bills === 1 ? '' : 's'}, ${fmtWt(b.net_wt)}${b.days > 1 ? ` (${b.days} days)` : ''}`)
+      const lines = p.branches.slice(0, 12).map(b => `· ${b.branch_name}: ${b.bills} bill${b.bills === 1 ? '' : 's'}, ${fmtWt(b.net_wt)}${b.days > 1 ? ` (${b.days} days)` : ''}${b.transferred_in ? ` · ${b.transferred_in} transferred in` : ''}`)
       if (p.branches.length > 12) lines.push(`· …and ${p.branches.length - 12} more branches`)
       const ok = await openConfirm({
         title: 'Clear Bangalore branch stock?',
