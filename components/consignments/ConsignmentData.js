@@ -2325,13 +2325,26 @@ export default function ConsignmentData() {
               // along, or the destination's own staff picking up) — offer
               // both directories in this one field.
               const destContactEmps = [...srcEmps, ...destEmps]
-              // Destination Contact only makes sense when a PERSON is
-              // actually involved in the handover — a hub move always
-              // involves one (Carried by), but for a direct-to-HO move it's
-              // only relevant when a branch employee (not a BVC courier) is
-              // the transporter.
-              const showDestContact = hasDestination
-                && (isHubPicked || (isExternal && transporterMode !== 'bvc'))
+              // Destination Contact only for a direct-to-HO move with a branch
+              // employee / other (not a BVC courier) as transporter. A hub move
+              // already names the person in Carried by, so it isn't asked there.
+              const showDestContact = isExternal && transporterMode !== 'bvc'
+              // Carried-by suggestions for a hub move: both branches' contacts
+              // from Branch Management first, then both branches' employees.
+              const carrierOptions = (() => {
+                const seen = new Set(), out = []
+                const add = (name, note, key) => {
+                  const k = (name || '').trim().toLowerCase()
+                  if (!k || seen.has(k)) return
+                  seen.add(k); out.push({ key, name: name.trim(), note })
+                }
+                const srcBr  = branches.find(b => b.name === nav?.branch)
+                const destBr = isHubPicked ? branches.find(b => b.name === destBranch) : null
+                add(srcBr?.contact_person,  `${nav?.branch} contact`, 'src-contact')
+                add(destBr?.contact_person, `${destBranch} contact`,  'dest-contact')
+                for (const e of [...srcEmps, ...(isHubPicked ? destEmps : [])]) add(e.name, [e.designation, e.crm_branch_name].filter(Boolean).join(' · '), e.id)
+                return out
+              })()
 
               return (
                 <>
@@ -2527,12 +2540,10 @@ export default function ConsignmentData() {
 
                   {/* Destination Contact — record-keeping only, does NOT print
                       on the Issue Voucher / Delivery Challan (unlike Branch
-                      Contact above). Hidden for BVC (a courier, not a named
-                      employee handover) — shown for a hub move (always
-                      involves a Carried-by employee) or a direct-to-HO move
-                      with Branch Employee / Other as the transporter. Options
-                      pool both the source and destination directories, since
-                      whoever's actually handling it could be from either. */}
+                      Contact above). Direct-to-HO moves with Branch Employee /
+                      Other as transporter only — not BVC (a courier), not hub
+                      moves (Carried by names the person). Options pool the
+                      source and HO directories. */}
                   {showDestContact && (
                     <div>
                       <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
@@ -2576,9 +2587,7 @@ export default function ConsignmentData() {
                         style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '13px 15px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box' }}
                       />
                       <datalist id="ba-carrier-suggestions">
-                        {branchEmps
-                          .filter(e => e.crm_branch_name === nav?.branch && e.name)
-                          .map(e => <option key={e.id} value={e.name}>{e.designation || ''}</option>)}
+                        {carrierOptions.map(o => <option key={o.key} value={o.name}>{o.note}</option>)}
                       </datalist>
                       <div style={{ fontSize: '10px', color: t.text4, marginTop: '5px' }}>
                         Leave blank to print just &ldquo;BRANCH EMPLOYEE&rdquo;.
