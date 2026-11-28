@@ -2270,6 +2270,13 @@ export default function ConsignmentData() {
               // the transporter.
               const showDestContact = hasDestination
                 && (isHubPicked || (isExternal && transporterMode !== 'bvc'))
+              // Branch Contact is only asked for when a branch employee carries
+              // the parcel: Branch Employee picked as transporter (direct to HO),
+              // or a self-carry hub move. Hidden for BVC — the seeded branch
+              // default still goes in the payload, same as the PDF fallback.
+              const showBranchContact = isExternal
+                ? transporterMode === 'branch_employee'
+                : isSelfCarryRegion(branches.find(b => b.name === nav?.branch)?.region)
 
               return (
                 <>
@@ -2443,7 +2450,7 @@ export default function ConsignmentData() {
                       handling THIS shipment is on the paperwork (not just the
                       branch manager). Empty → fall back to branch defaults at
                       PDF-generation time. */}
-                  <div>
+                  {showBranchContact && <div>
                     <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
                       Branch Contact <span style={{ textTransform: 'none', fontWeight: 400, color: t.text4 }}>(prints on {moveType === 'INTERNAL' ? 'Issue Voucher' : 'Delivery Challan'})</span>
                     </div>
@@ -2464,7 +2471,7 @@ export default function ConsignmentData() {
                         style={{ flex: 1, minWidth: 0, background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '13px 15px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace' }}
                       />
                     </div>
-                  </div>
+                  </div>}
 
                   {/* Destination Contact — record-keeping only, does NOT print
                       on the Issue Voucher / Delivery Challan (unlike Branch
