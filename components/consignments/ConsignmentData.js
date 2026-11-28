@@ -169,7 +169,11 @@ function filterActiveConsignments(rows) {
 }
 
 export default function ConsignmentData() {
-  const { theme, consignmentDeepLink, setConsignmentDeepLink, setActiveNav } = useApp()
+  const { theme, consignmentDeepLink, setConsignmentDeepLink, setActiveNav, userProfile } = useApp()
+  // Bangalore daily stock clear — admin-only (server gates on ROLE_GROUPS.ADMIN too).
+  const canClearBangalore = ['super_admin', 'founders_office', 'admin'].includes(userProfile?.role)
+  const [bglrDate, setBglrDate] = useState(() => istDaysAgo(1))
+  const [bglrBusy, setBglrBusy] = useState(false)
   // Track whether the user landed here via a Branch Stock Overview row click,
   // so the Back button can return them to that view instead of the local list.
   const cameFromBranchStock = useRef(false)
@@ -1293,6 +1297,43 @@ export default function ConsignmentData() {
     )
   }
 
+  // Bangalore daily stock clear: preview → confirm → move bills to HO.
+  const runBangaloreClear = async () => {
+    if (bglrBusy || !bglrDate) return
+    setBglrBusy(true)
+    try {
+      const call = async (dry_run) => {
+        const res = await authedFetch('/api/consignments', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'bangalore_clear_stock', date: bglrDate, dry_run }),
+        })
+        const j = await res.json()
+        if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`)
+        return j.data
+      }
+      const p = await call(true)
+      const olderNote = p.older?.length
+        ? `\n\nNot included — earlier days still at branch: ${p.older.map(o => `${o.date} (${o.bills})`).join(', ')}. Pick that date to clear it.`
+        : ''
+      if (!p.bills) { setToast({ msg: `No Bangalore bills at branch for ${bglrDate}.${olderNote ? ` Earlier days pending: ${p.older.map(o => o.date).join(', ')}.` : ''}`, type: olderNote ? 'error' : 'success' }); return }
+      const lines = p.branches.slice(0, 12).map(b => `· ${b.branch_name}: ${b.bills} bill${b.bills === 1 ? '' : 's'}, ${fmtWt(b.net_wt)}`)
+      if (p.branches.length > 12) lines.push(`· …and ${p.branches.length - 12} more branches`)
+      const ok = await openConfirm({
+        title: 'Clear Bangalore branch stock?',
+        message: `Moves every Bangalore bill still at branch from billing day ${bglrDate} to HO.\n\n${p.bills} bills · ${fmtWt(p.net_wt)} · ₹${fmt(p.value)} across ${p.branches.length} branches\n\n${lines.join('\n')}\n\nEach of these branches' next TMP PRF advances by one.${olderNote}`,
+        confirmLabel: `Move ${p.bills} bills to HO`,
+      })
+      if (!ok) return
+      const r = await call(false)
+      setToast({ msg: `${r.moved} Bangalore bills moved to HO · ${r.seeded.length} branch seals advanced.`, type: 'success' })
+      fetchAll(true)
+    } catch (e) {
+      setToast({ msg: `Bangalore clear failed: ${e.message}`, type: 'error' })
+    } finally {
+      setBglrBusy(false)
+    }
+  }
+
   // ── ACTIVE CONSIGNMENTS LIST ─────────────────────────────────────────────
   // Same render-helper pattern as renderBillPicker — see comment there.
   const renderConsignmentsList = () => (
@@ -1387,6 +1428,17 @@ export default function ConsignmentData() {
             {hasFilters && (
               <button onClick={() => { setFilterRegions(new Set()); setSearch(''); setDateFrom(today); setDateTo(today) }}
                 style={{ ...btnOut, padding: '5px 11px', fontSize: '11px' }}>Clear all</button>
+            )}
+            {canClearBangalore && (
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px', alignItems: 'center' }}>
+                <input type="date" value={bglrDate} onChange={e => setBglrDate(e.target.value)} max={today}
+                  title="Billing day to clear (Bangalore branches)"
+                  style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '6px 8px', fontSize: '11px', color: t.text2, outline: 'none', colorScheme: 'dark' }} />
+                <button onClick={runBangaloreClear} disabled={bglrBusy}
+                  style={{ ...btnOut, padding: '6px 12px', fontSize: '11px', fontWeight: 700, color: t.gold, borderColor: `${t.gold}60`, opacity: bglrBusy ? .6 : 1, cursor: bglrBusy ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}>
+                  {bglrBusy ? 'Clearing…' : 'Clear Bangalore stock → HO'}
+                </button>
+              </div>
             )}
           </div>
         )
