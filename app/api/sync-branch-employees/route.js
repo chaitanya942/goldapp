@@ -9,7 +9,7 @@ const supabase = createClient(
 )
 
 // Full refresh of branch_employees from the NEW CRM "Employee" table (Postgres).
-// Wipes the table and re-inserts every employee with their full profile. Branch
+// Wipes the table and re-inserts every ACTIVE employee with their full profile. Branch
 // is matched to a Supabase branch by name (NEW CRM Branch.name).
 export async function POST(req) {
   // Cron-token bypass (server-to-server, no session) — the daily midnight sync in
@@ -47,6 +47,11 @@ export async function POST(req) {
         FROM "Employee" e
         LEFT JOIN "Branch" b ON b.id = e.branch_id
        WHERE trim(coalesce(e.first_name,'') || ' ' || coalesce(e.last_name,'')) <> ''
+         -- Active employees only. The CRM's real "inactive" flag is status=false
+         -- (299 of 302 inactive have active=true but status=false — no logins or
+         -- transactions); active=false covers the rest. Inactive staff are not
+         -- stored at all, so they vanish from GoldApp on the next sync.
+         AND coalesce(e.active, true) AND coalesce(e.status, true)
        ORDER BY b.name, e.designation, e.first_name
     `)
     // ── CRM activity per employee (keyed by emp_id code) ──
