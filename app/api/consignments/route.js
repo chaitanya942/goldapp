@@ -5864,8 +5864,8 @@ export async function POST(req) {
     // (coalesce(current_branch, branch_name)), the same rule Branch Stock uses.
     // So ROK bills transferred into a Bangalore hub (Yelahanka, Vajrahalli,
     // K R Puram…) are cleared with it, and a Bangalore bill moved out to a
-    // non-Bangalore branch is not. Own bills must be CRM-approved; transferred-
-    // in bills are taken as-is (Branch Stock shows them either way).
+    // non-Bangalore branch is not. Only CRM-completed (approved) bills — own
+    // or transferred in — are ever moved.
     const fetchHeld = async (applyDates, cols) => {
       const byId = new Map()
       const run = async (build) => {
@@ -5876,16 +5876,14 @@ export async function POST(req) {
           if (!data || data.length < 1000) break
         }
       }
-      const base = () => supabase.from('purchases').select(`id, branch_name, current_branch, crm_status, ${cols}`)
-        .eq('stock_status', 'at_branch').eq('is_deleted', false)
+      const base = () => supabase.from('purchases').select(`id, branch_name, current_branch, ${cols}`)
+        .eq('stock_status', 'at_branch').eq('is_deleted', false).eq('crm_status', 'approved')
       for (let i = 0; i < names.length; i += 100) {
         const slice = names.slice(i, i + 100)
         await run(() => base().in('current_branch', slice))
         await run(() => base().is('current_branch', null).in('branch_name', slice))
       }
-      return [...byId.values()]
-        .filter(r => (r.current_branch && r.current_branch !== r.branch_name) || r.crm_status === 'approved')
-        .map(r => ({ ...r, holder: r.current_branch || r.branch_name }))
+      return [...byId.values()].map(r => ({ ...r, holder: r.current_branch || r.branch_name }))
     }
 
     let bills, olderRows
