@@ -1446,17 +1446,6 @@ export default function ConsignmentData() {
               <button onClick={() => { setFilterRegions(new Set()); setSearch(''); setDateFrom(today); setDateTo(today) }}
                 style={{ ...btnOut, padding: '5px 11px', fontSize: '11px' }}>Clear all</button>
             )}
-            {canClearBangalore && (
-              <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px', alignItems: 'center' }}>
-                <input type="date" value={bglrDate} onChange={e => setBglrDate(e.target.value)} max={today}
-                  title="Billing day to clear (Bangalore branches)"
-                  style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '7px', padding: '6px 8px', fontSize: '11px', color: t.text2, outline: 'none', colorScheme: 'dark' }} />
-                <button onClick={runBangaloreClear} disabled={bglrBusy}
-                  style={{ ...btnOut, padding: '6px 12px', fontSize: '11px', fontWeight: 700, color: t.gold, borderColor: `${t.gold}60`, opacity: bglrBusy ? .6 : 1, cursor: bglrBusy ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}>
-                  {bglrBusy ? 'Clearing…' : 'Clear Bangalore stock → HO'}
-                </button>
-              </div>
-            )}
           </div>
         )
       })()}
@@ -2050,6 +2039,17 @@ export default function ConsignmentData() {
               : `${consignments.length} active consignment${consignments.length !== 1 ? 's' : ''} · branch movements in flight`}
           </div>
         </div>
+        {canClearBangalore && !nav?.branch && (
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <input type="date" value={bglrDate} onChange={e => setBglrDate(e.target.value)} max={istToday()}
+              title="Billing day to clear (Bangalore branches)"
+              style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 8px', fontSize: '12px', color: t.text2, outline: 'none', colorScheme: 'dark' }} />
+            <button onClick={runBangaloreClear} disabled={bglrBusy}
+              style={{ ...btnOut, fontWeight: 700, color: t.gold, borderColor: `${t.gold}60`, opacity: bglrBusy ? .6 : 1, cursor: bglrBusy ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}>
+              {bglrBusy ? 'Clearing…' : 'Clear Bangalore stock → HO'}
+            </button>
+          </div>
+        )}
         <button onClick={fetchAll} disabled={loading} style={{ ...btnOut, display: 'inline-flex', alignItems: 'center', gap: '6px', cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.7 : 1 }}>
           <span className={loading ? 'cdata-refresh-spin' : ''} style={{ display: 'inline-block', fontSize: '13px' }}>⟳</span>
           {loading ? 'Refreshing…' : 'Refresh'}
