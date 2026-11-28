@@ -2329,20 +2329,17 @@ export default function ConsignmentData() {
               // employee / other (not a BVC courier) as transporter. A hub move
               // already names the person in Carried by, so it isn't asked there.
               const showDestContact = isExternal && transporterMode !== 'bvc'
-              // Carried-by suggestions for a hub move: both branches' contacts
-              // from Branch Management first, then both branches' employees.
+              // Carried-by suggestions for a hub move: the source and destination
+              // branch managers as set up in Branch Management (GoldApp) — not
+              // the CRM employee directory.
               const carrierOptions = (() => {
-                const seen = new Set(), out = []
-                const add = (name, note, key) => {
-                  const k = (name || '').trim().toLowerCase()
-                  if (!k || seen.has(k)) return
-                  seen.add(k); out.push({ key, name: name.trim(), note })
+                const out = []
+                for (const [key, name] of [['src', nav?.branch], ['dest', isHubPicked ? destBranch : null]]) {
+                  const br = name && branches.find(b => b.name === name)
+                  const person = (br?.contact_person || '').trim()
+                  if (!person || out.some(o => o.name.toLowerCase() === person.toLowerCase())) continue
+                  out.push({ key, name: person, note: [name, br.contact_phone].filter(Boolean).join(' · ') })
                 }
-                const srcBr  = branches.find(b => b.name === nav?.branch)
-                const destBr = isHubPicked ? branches.find(b => b.name === destBranch) : null
-                add(srcBr?.contact_person,  `${nav?.branch} contact`, 'src-contact')
-                add(destBr?.contact_person, `${destBranch} contact`,  'dest-contact')
-                for (const e of [...srcEmps, ...(isHubPicked ? destEmps : [])]) add(e.name, [e.designation, e.crm_branch_name].filter(Boolean).join(' · '), e.id)
                 return out
               })()
 
