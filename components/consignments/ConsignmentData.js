@@ -2329,16 +2329,15 @@ export default function ConsignmentData() {
               // employee / other (not a BVC courier) as transporter. A hub move
               // already names the person in Carried by, so it isn't asked there.
               const showDestContact = isExternal && transporterMode !== 'bvc'
-              // Carried-by suggestions for a hub move: the source and destination
-              // branch managers as set up in Branch Management (GoldApp) — not
-              // the CRM employee directory.
+              // Carried-by suggestions for a hub move: every (active) employee of
+              // the source and destination branches, with their own phone.
               const carrierOptions = (() => {
                 const out = []
-                for (const [key, name] of [['src', nav?.branch], ['dest', isHubPicked ? destBranch : null]]) {
-                  const br = name && branches.find(b => b.name === name)
-                  const person = (br?.contact_person || '').trim()
-                  if (!person || out.some(o => o.name.toLowerCase() === person.toLowerCase())) continue
-                  out.push({ key, name: person, phone: (br.contact_phone || '').trim(), note: [name, br.contact_phone].filter(Boolean).join(' · ') })
+                for (const e of [...srcEmps, ...(isHubPicked ? destEmps : [])]) {
+                  const name = (e.name || '').trim()
+                  if (!name || out.some(o => o.name.toLowerCase() === name.toLowerCase())) continue
+                  const phone = (e.contact_phone || e.mobile_phone || '').trim()
+                  out.push({ key: e.id, name, phone, note: [e.designation, e.crm_branch_name, phone].filter(Boolean).join(' · ') })
                 }
                 return out
               })()
