@@ -263,6 +263,7 @@ export default function ConsignmentData() {
   // of Karnataka branches have no employee records, so a strict dropdown would
   // block consignment creation there.
   const [carrierName,         setCarrierName]        = useState('')
+  const [carrierPhone,        setCarrierPhone]       = useState('')
   const [branchEmps,          setBranchEmps]         = useState([])
   const [showModal,           setShowModal]          = useState(false)
   const [lastConsignment,     setLastConsignment]    = useState(null)
@@ -667,6 +668,7 @@ export default function ConsignmentData() {
           dest_contact_phone: destContactPhone.trim() || null,
           transporter_name,
           transport_mode,
+          carrier_phone: isSelfCarry ? (carrierPhone.trim() || null) : null,
         }),
       })
       const result = await res.json()
@@ -1176,7 +1178,7 @@ export default function ConsignmentData() {
                   setBranchContactPhone(br?.contact_phone  || '')
                   setDestContactName(''); setDestContactPhone('')
                   setTransporterMode('bvc'); setTransporterOther('')   // default each dispatch to BVC
-                  setCarrierName('')
+                  setCarrierName(''); setCarrierPhone('')
                   // Employee directory — powers the quick-fill dropdowns on both
                   // the source (Branch Contact) and destination (Destination
                   // Contact) sides, plus the self-carry Carried-by suggestions.
@@ -2575,24 +2577,31 @@ export default function ConsignmentData() {
                       <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
                         Carried by <span style={{ textTransform: 'none', fontWeight: 400, color: t.text4 }}>(branch employee — prints on Issue Voucher)</span>
                       </div>
-                      <input
-                        value={carrierName}
-                        onChange={e => setCarrierName(e.target.value.slice(0, 40))}
-                        placeholder="Employee name"
-                        list="ba-carrier-suggestions"
-                        style={{ width: '100%', background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '13px 15px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box' }}
-                      />
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <input
+                          value={carrierName}
+                          onChange={e => {
+                            const v = e.target.value.slice(0, 40)
+                            setCarrierName(v)
+                            // Picking a listed employee fills their phone; still editable.
+                            const picked = carrierOptions.find(o => o.name.toLowerCase() === v.trim().toLowerCase())
+                            if (picked) setCarrierPhone(picked.phone || '')
+                          }}
+                          placeholder="Name"
+                          list="ba-carrier-suggestions"
+                          style={{ flex: 1.4, minWidth: 0, background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '13px 15px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box' }}
+                        />
+                        <input
+                          value={carrierPhone}
+                          onChange={e => setCarrierPhone(e.target.value.replace(/[^\d+ ]/g, '').slice(0, 18))}
+                          placeholder="Phone"
+                          inputMode="tel"
+                          style={{ flex: 1, minWidth: 0, background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '10px', padding: '13px 15px', fontSize: '13px', color: t.text1, outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace' }}
+                        />
+                      </div>
                       <datalist id="ba-carrier-suggestions">
                         {carrierOptions.map(o => <option key={o.key} value={o.name}>{o.note}</option>)}
                       </datalist>
-                      {(() => {
-                        const picked = carrierOptions.find(o => o.name.toLowerCase() === carrierName.trim().toLowerCase())
-                        return picked?.phone ? (
-                          <div style={{ fontSize: '12px', color: t.text2, marginTop: '6px' }}>
-                            Contact: <span style={{ fontFamily: 'monospace', color: t.text1 }}>{picked.phone}</span>
-                          </div>
-                        ) : null
-                      })()}
                       <div style={{ fontSize: '10px', color: t.text4, marginTop: '5px' }}>
                         Leave blank to print just &ldquo;BRANCH EMPLOYEE&rdquo;.
                       </div>

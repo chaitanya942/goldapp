@@ -3707,6 +3707,12 @@ export async function POST(req) {
       if (transMode)   tp.transport_mode   = transMode
       supabase.from('consignments').update(tp).eq('id', rpcConsignment.id).then(() => {}).catch(() => {})
     }
+    // Carried-by employee's phone (self-carry hub moves). Own update so it
+    // no-ops until sql/consignment_carrier_phone.sql has been applied.
+    const carrierPhone = (typeof body.carrier_phone === 'string') ? body.carrier_phone.trim().slice(0, 24) : ''
+    if (carrierPhone) {
+      supabase.from('consignments').update({ carrier_phone: carrierPhone }).eq('id', rpcConsignment.id).then(() => {}).catch(() => {})
+    }
 
     // INTERNAL (Branch → Hub): bills become hub stock the moment the voucher
     // is created. Mirrors the Bangalore hub-create flow and the documented
