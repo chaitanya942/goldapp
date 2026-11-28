@@ -2338,7 +2338,7 @@ export default function ConsignmentData() {
                   const br = name && branches.find(b => b.name === name)
                   const person = (br?.contact_person || '').trim()
                   if (!person || out.some(o => o.name.toLowerCase() === person.toLowerCase())) continue
-                  out.push({ key, name: person, note: [name, br.contact_phone].filter(Boolean).join(' · ') })
+                  out.push({ key, name: person, phone: (br.contact_phone || '').trim(), note: [name, br.contact_phone].filter(Boolean).join(' · ') })
                 }
                 return out
               })()
@@ -2586,6 +2586,14 @@ export default function ConsignmentData() {
                       <datalist id="ba-carrier-suggestions">
                         {carrierOptions.map(o => <option key={o.key} value={o.name}>{o.note}</option>)}
                       </datalist>
+                      {(() => {
+                        const picked = carrierOptions.find(o => o.name.toLowerCase() === carrierName.trim().toLowerCase())
+                        return picked?.phone ? (
+                          <div style={{ fontSize: '12px', color: t.text2, marginTop: '6px' }}>
+                            Contact: <span style={{ fontFamily: 'monospace', color: t.text1 }}>{picked.phone}</span>
+                          </div>
+                        ) : null
+                      })()}
                       <div style={{ fontSize: '10px', color: t.text4, marginTop: '5px' }}>
                         Leave blank to print just &ldquo;BRANCH EMPLOYEE&rdquo;.
                       </div>
