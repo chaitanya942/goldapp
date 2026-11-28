@@ -172,7 +172,8 @@ export default function ConsignmentData() {
   const { theme, consignmentDeepLink, setConsignmentDeepLink, setActiveNav, userProfile } = useApp()
   // Bangalore daily stock clear — admin-only (server gates on ROLE_GROUPS.ADMIN too).
   const canClearBangalore = ['super_admin', 'founders_office', 'admin'].includes(userProfile?.role)
-  const [bglrDate, setBglrDate] = useState(() => istDaysAgo(1))
+  const [bglrFrom, setBglrFrom] = useState(() => istDaysAgo(1))
+  const [bglrTo,   setBglrTo]   = useState(() => istDaysAgo(1))
   const [bglrBusy, setBglrBusy] = useState(false)
   // Track whether the user landed here via a Branch Stock Overview row click,
   // so the Back button can return them to that view instead of the local list.
@@ -1316,28 +1317,30 @@ export default function ConsignmentData() {
 
   // Bangalore daily stock clear: preview → confirm → move bills to HO.
   const runBangaloreClear = async () => {
-    if (bglrBusy || !bglrDate) return
+    if (bglrBusy || !bglrFrom || !bglrTo) return
+    if (bglrTo < bglrFrom) { setToast({ msg: 'To date must be on or after From date.', type: 'error' }); return }
     setBglrBusy(true)
     try {
       const call = async (dry_run) => {
         const res = await authedFetch('/api/consignments', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'bangalore_clear_stock', date: bglrDate, dry_run }),
+          body: JSON.stringify({ action: 'bangalore_clear_stock', from: bglrFrom, to: bglrTo, dry_run }),
         })
         const j = await res.json()
         if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`)
         return j.data
       }
+      const range = bglrFrom === bglrTo ? bglrFrom : `${bglrFrom} to ${bglrTo}`
       const p = await call(true)
       const olderNote = p.older?.length
-        ? `\n\nNot included — earlier days still at branch: ${p.older.map(o => `${o.date} (${o.bills})`).join(', ')}. Pick that date to clear it.`
+        ? `\n\nNot included — earlier days still at branch: ${p.older.map(o => `${o.date} (${o.bills})`).join(', ')}.`
         : ''
-      if (!p.bills) { setToast({ msg: `No Bangalore bills at branch for ${bglrDate}.${olderNote ? ` Earlier days pending: ${p.older.map(o => o.date).join(', ')}.` : ''}`, type: olderNote ? 'error' : 'success' }); return }
-      const lines = p.branches.slice(0, 12).map(b => `· ${b.branch_name}: ${b.bills} bill${b.bills === 1 ? '' : 's'}, ${fmtWt(b.net_wt)}`)
+      if (!p.bills) { setToast({ msg: `No Bangalore bills at branch for ${range}.${olderNote ? ` Earlier days pending: ${p.older.map(o => o.date).join(', ')}.` : ''}`, type: olderNote ? 'error' : 'success' }); return }
+      const lines = p.branches.slice(0, 12).map(b => `· ${b.branch_name}: ${b.bills} bill${b.bills === 1 ? '' : 's'}, ${fmtWt(b.net_wt)}${b.days > 1 ? ` (${b.days} days)` : ''}`)
       if (p.branches.length > 12) lines.push(`· …and ${p.branches.length - 12} more branches`)
       const ok = await openConfirm({
         title: 'Clear Bangalore branch stock?',
-        message: `Moves every Bangalore bill still at branch from billing day ${bglrDate} to HO.\n\n${p.bills} bills · ${fmtWt(p.net_wt)} · ₹${fmt(p.value)} across ${p.branches.length} branches\n\n${lines.join('\n')}\n\nEach of these branches' next TMP PRF advances by one.${olderNote}`,
+        message: `Moves every Bangalore bill still at branch with billing day ${range} to HO.\n\n${p.bills} bills · ${fmtWt(p.net_wt)} · ₹${fmt(p.value)} across ${p.branches.length} branches\n\n${lines.join('\n')}\n\nTMP PRF advances by one per branch per billing day (${p.seals} in total).${olderNote}`,
         confirmLabel: `Move ${p.bills} bills to HO`,
       })
       if (!ok) return
@@ -2040,9 +2043,14 @@ export default function ConsignmentData() {
           </div>
         </div>
         {canClearBangalore && !nav?.branch && (
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px', alignItems: 'center' }}>
-            <input type="date" value={bglrDate} onChange={e => setBglrDate(e.target.value)} max={istToday()}
-              title="Billing day to clear (Bangalore branches)"
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 600 }}>From</span>
+            <input type="date" value={bglrFrom} onChange={e => setBglrFrom(e.target.value)} max={bglrTo || istToday()}
+              title="First billing day to clear (Bangalore branches)"
+              style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 8px', fontSize: '12px', color: t.text2, outline: 'none', colorScheme: 'dark' }} />
+            <span style={{ fontSize: '10px', color: t.text4, letterSpacing: '.06em', textTransform: 'uppercase', fontWeight: 600 }}>To</span>
+            <input type="date" value={bglrTo} onChange={e => setBglrTo(e.target.value)} min={bglrFrom || undefined} max={istToday()}
+              title="Last billing day to clear (Bangalore branches)"
               style={{ background: t.card2, border: `1px solid ${t.border2}`, borderRadius: '8px', padding: '7px 8px', fontSize: '12px', color: t.text2, outline: 'none', colorScheme: 'dark' }} />
             <button onClick={runBangaloreClear} disabled={bglrBusy}
               style={{ ...btnOut, fontWeight: 700, color: t.gold, borderColor: `${t.gold}60`, opacity: bglrBusy ? .6 : 1, cursor: bglrBusy ? 'wait' : 'pointer', whiteSpace: 'nowrap' }}>

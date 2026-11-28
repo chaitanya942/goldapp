@@ -5831,24 +5831,28 @@ export async function POST(req) {
     return Response.json({ success: true, status: finalStatus })
   }
 
-  // ── Remove item from consignment ─────────────────────────────────────────
   // ── Bangalore daily stock clear ───────────────────────────────────────────
   // Replaces the hand-run "Bangalore morning op" SQL. Bangalore bills never
   // ride a consignment (HO is in the same city): every approved bill still
-  // at a Bangalore-region branch with purchase_date = `date` (one billing day,
-  // like the SQL) goes straight to at_ho, and each branch that had bills moved
-  // gets one status='seed' row so its next tmp_prf advances by one (the day's
-  // physical seal). Filters on region='Bangalore' exactly like the SQL — Rest
-  // of Karnataka is NOT swept. Older un-swept days are only REPORTED
-  // (`older`), never moved — whole days were skipped on purpose or by miss
-  // (28 Oct, 2–4 Nov 2026) and need a human call, one day at a time.
+  // at a Bangalore-region branch with purchase_date in [from, to] goes
+  // straight to at_ho, and for each (branch, billing day) that had bills moved
+  // one status='seed' row is added so the branch's next tmp_prf advances by
+  // one — one physical seal per branch per day, same as running the SQL once
+  // per day. Filters on region='Bangalore' exactly like the SQL — Rest of
+  // Karnataka is NOT swept. Days before `from` still at branch are only
+  // REPORTED (`older`), never moved — whole days were skipped on purpose or by
+  // miss (28 Oct, 2–4 Nov 2026) and need a human call.
   // dry_run → per-branch preview only. Idempotent: a second run finds no
   // at_branch bills, so it moves nothing and adds no seed rows.
   if (action === 'bangalore_clear_stock') {
-    const { date, dry_run } = body
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
-      return Response.json({ error: 'date (YYYY-MM-DD) required' }, { status: 400 })
+    const { dry_run } = body
+    const from = body.from || body.date
+    const to   = body.to   || body.date
+    const isDay = (d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d || ''))
+    if (!isDay(from) || !isDay(to)) {
+      return Response.json({ error: 'from and to (YYYY-MM-DD) required' }, { status: 400 })
     }
+    if (to < from) return Response.json({ error: 'to must be on/after from' }, { status: 400 })
     const { data: brs, error: brErr } = await supabase
       .from('branches').select('name, branch_code').eq('region', 'Bangalore')
     if (brErr) return Response.json({ error: brErr.message }, { status: 500 })
@@ -5864,7 +5868,7 @@ export async function POST(req) {
           .select('id, branch_name, purchase_date, net_weight, total_amount')
           .in('branch_name', slice)
           .eq('stock_status', 'at_branch').eq('is_deleted', false).eq('crm_status', 'approved')
-          .eq('purchase_date', date)
+          .gte('purchase_date', from).lte('purchase_date', to)
           .order('id')
           .range(off, off + 999)
         if (error) return Response.json({ error: error.message }, { status: 500 })
@@ -5873,7 +5877,7 @@ export async function POST(req) {
       }
     }
 
-    // Earlier billing days still at a Bangalore branch — reported, not moved.
+    // Billing days before `from` still at a Bangalore branch — reported, not moved.
     const olderByDate = {}
     for (let i = 0; i < names.length; i += 100) {
       for (let off = 0; ; off += 1000) {
@@ -5882,7 +5886,7 @@ export async function POST(req) {
           .select('purchase_date')
           .in('branch_name', names.slice(i, i + 100))
           .eq('stock_status', 'at_branch').eq('is_deleted', false).eq('crm_status', 'approved')
-          .lt('purchase_date', date)
+          .lt('purchase_date', from)
           .order('id')
           .range(off, off + 999)
         if (error) return Response.json({ error: error.message }, { status: 500 })
@@ -5892,26 +5896,31 @@ export async function POST(req) {
     }
     const older = Object.entries(olderByDate).sort().map(([d, n]) => ({ date: d, bills: n }))
 
-    const byBranch = {}
+    // Preview summary per branch; the write works per (branch, billing day).
+    const byBranch = {}, byBranchDay = {}
     for (const b of bills) {
-      const g = byBranch[b.branch_name] || (byBranch[b.branch_name] = { branch_name: b.branch_name, ids: [], bills: 0, net_wt: 0, value: 0, oldest: b.purchase_date })
-      g.ids.push(b.id); g.bills++
+      const g = byBranch[b.branch_name] || (byBranch[b.branch_name] = { branch_name: b.branch_name, bills: 0, days: new Set(), net_wt: 0, value: 0 })
+      g.bills++; g.days.add(b.purchase_date)
       g.net_wt += Number(b.net_weight || 0); g.value += Number(b.total_amount || 0)
-      if (b.purchase_date < g.oldest) g.oldest = b.purchase_date
+      const key = `${b.branch_name}|${b.purchase_date}`
+      ;(byBranchDay[key] || (byBranchDay[key] = { branch_name: b.branch_name, day: b.purchase_date, ids: [] })).ids.push(b.id)
     }
-    const groups  = Object.values(byBranch).sort((a, b) => b.bills - a.bills)
-    const summary = groups.map(({ ids, ...g }) => ({ ...g, net_wt: Number(g.net_wt.toFixed(3)) }))
+    const summary = Object.values(byBranch).sort((a, b) => b.bills - a.bills)
+      .map(g => ({ ...g, days: g.days.size, net_wt: Number(g.net_wt.toFixed(3)) }))
     const totals  = {
       bills:  bills.length,
-      net_wt: Number(groups.reduce((s, g) => s + g.net_wt, 0).toFixed(3)),
-      value:  Math.round(groups.reduce((s, g) => s + g.value, 0)),
+      net_wt: Number(summary.reduce((s, g) => s + g.net_wt, 0).toFixed(3)),
+      value:  Math.round(summary.reduce((s, g) => s + g.value, 0)),
+      seals:  Object.keys(byBranchDay).length,
     }
-    if (dry_run || !bills.length) return Response.json({ data: { date, ...totals, branches: summary, older, moved: 0, seeded: [] } })
+    if (dry_run || !bills.length) return Response.json({ data: { from, to, ...totals, branches: summary, older, moved: 0, seeded: [] } })
 
+    // Oldest day first so each branch's seals advance in billing order.
+    const work = Object.values(byBranchDay).sort((a, b) => a.day.localeCompare(b.day) || a.branch_name.localeCompare(b.branch_name))
     let moved = 0
     const seeded = []
-    for (const g of groups) {
-      let branchMoved = 0
+    for (const g of work) {
+      let dayMoved = 0
       for (let i = 0; i < g.ids.length; i += 100) {
         // Re-assert at_branch on the write so a bill consigned between the
         // read and now is never yanked out of its consignment.
@@ -5920,11 +5929,11 @@ export async function POST(req) {
           .update({ stock_status: 'at_ho' }, { count: 'exact' })
           .in('id', g.ids.slice(i, i + 100))
           .eq('stock_status', 'at_branch')
-        if (error) return Response.json({ error: `${g.branch_name}: ${error.message}`, moved, seeded }, { status: 500 })
-        branchMoved += count || 0
+        if (error) return Response.json({ error: `${g.branch_name} ${g.day}: ${error.message}`, moved, seeded }, { status: 500 })
+        dayMoved += count || 0
       }
-      moved += branchMoved
-      if (!branchMoved) continue
+      moved += dayMoved
+      if (!dayMoved) continue
       const wg = intToTmpPrf((await maxTmpPrf(supabase, g.branch_name)) + 1)
       const { error: sErr } = await supabase.from('consignments').insert({
         consignment_no: `SEED-${g.branch_name}-${wg}`, tmp_prf_no: wg,
@@ -5933,13 +5942,14 @@ export async function POST(req) {
         state_code: 'KA', movement_type: 'EXTERNAL', status: 'seed',
         total_bills: 0, total_net_wt: 0, total_amount: 0, created_by: 'SYSTEM_SEED',
       })
-      if (sErr) return Response.json({ error: `${g.branch_name} seed: ${sErr.message}`, moved, seeded }, { status: 500 })
-      seeded.push({ branch_name: g.branch_name, tmp_prf_no: wg })
+      if (sErr) return Response.json({ error: `${g.branch_name} ${g.day} seed: ${sErr.message}`, moved, seeded }, { status: 500 })
+      seeded.push({ branch_name: g.branch_name, day: g.day, tmp_prf_no: wg })
     }
-    console.log(`[bangalore_clear_stock] ${actorEmail} date=${date}: ${moved} bill(s) → at_ho, ${seeded.length} seed row(s)`)
-    return Response.json({ data: { date, ...totals, branches: summary, older, moved, seeded } })
+    console.log(`[bangalore_clear_stock] ${actorEmail} ${from}..${to}: ${moved} bill(s) → at_ho, ${seeded.length} seed row(s)`)
+    return Response.json({ data: { from, to, ...totals, branches: summary, older, moved, seeded } })
   }
 
+  // ── Remove item from consignment ─────────────────────────────────────────
   if (action === 'remove_item') {
     const { consignment_id, purchase_id } = body
     await supabase.from('consignment_items')
