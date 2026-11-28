@@ -1167,8 +1167,10 @@ export default function ConsignmentData() {
             <span style={{ fontSize: '12px', color: t.text3 }}>₹{fmt(Math.round(totalSelAmt))}</span>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
               <button onClick={() => {
-                  // Seed the Branch Contact name + phone from the branch's
-                  // configured default. Operator can edit before confirming.
+                  // Seed the Branch Contact name + phone from the source branch's
+                  // contact set up in Branch Management (GoldApp) — not the CRM
+                  // employee directory, whose phones can be wrong. Operator can
+                  // edit before confirming.
                   const br = branches.find(b => b.name === nav?.branch)
                   setBranchContactName(br?.contact_person || '')
                   setBranchContactPhone(br?.contact_phone  || '')
@@ -1182,24 +1184,7 @@ export default function ConsignmentData() {
                   // pulled for operators who never create a consignment.
                   authedFetch('/api/branch-employees')
                     .then(r => r.json())
-                    .then(d => {
-                      const emps = Array.isArray(d?.employees) ? d.employees : []
-                      setBranchEmps(emps)
-                      // Default Branch Contact = the source branch's manager from
-                      // the directory (is_manager, else a "Branch Manager" title);
-                      // with several, prefer the branch's configured contact. No
-                      // manager on file → keep the branch default seeded above.
-                      const target = (nav?.branch || '').trim().toLowerCase()
-                      const mine = emps.filter(e => e.name && (e.crm_branch_name || '').trim().toLowerCase() === target)
-                      let mgrs = mine.filter(e => e.is_manager)
-                      if (!mgrs.length) mgrs = mine.filter(e => /^(senior )?branch manager/i.test(e.designation || ''))
-                      const cp  = (br?.contact_person || '').trim().toLowerCase()
-                      const mgr = mgrs.find(e => cp && e.name.trim().toLowerCase() === cp) || mgrs[0]
-                      if (mgr) {
-                        setBranchContactName(mgr.name)
-                        setBranchContactPhone(mgr.contact_phone || mgr.mobile_phone || br?.contact_phone || '')
-                      }
-                    })
+                    .then(d => setBranchEmps(Array.isArray(d?.employees) ? d.employees : []))
                     .catch(() => setBranchEmps([]))   // fields stay free-text
                   setShowModal(true)
                   fetchPreviewNumbers()
@@ -2515,11 +2500,10 @@ export default function ConsignmentData() {
                   </div>
 
                   {/* Branch Contact override — prints on Delivery Challan +
-                      Issue Voucher. Pre-seeded with the source branch manager
-                      (branch's configured contact as fallback); operations can
-                      type over it so the person actually handling THIS shipment
-                      is on the paperwork. Empty → fall back to branch defaults
-                      at PDF-generation time. */}
+                      Issue Voucher. Pre-seeded with the source branch's contact
+                      from Branch Management; operations can type over it so the
+                      person actually handling THIS shipment is on the paperwork.
+                      Empty → fall back to branch defaults at PDF-generation time. */}
                   <div>
                     <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
                       Branch Contact <span style={{ textTransform: 'none', fontWeight: 400, color: t.text4 }}>(prints on {moveType === 'INTERNAL' ? 'Issue Voucher' : 'Delivery Challan'})</span>
