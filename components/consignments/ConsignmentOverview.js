@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { useApp, useRegionAccess } from '../../lib/context'
 import GoldSpinner from '../ui/GoldSpinner'
 import { authedFetch, prefetch } from '../../lib/authedFetch'
+import { PickupTimeChip, PickupDaysChip } from './pickupChips'
 import { supabase } from '../../lib/supabase'
 import { triggerSync } from '../../lib/triggerSync'
 import { getCache, setCache } from '../../lib/moduleCache'
@@ -84,15 +85,6 @@ const fmtTsDate = (ts) => {
   if (!ts) return '—'
   const d = new Date(new Date(ts).getTime() + 5.5 * 3600000)
   return `${d.getUTCDate()} ${MONTHS_ABBR[d.getUTCMonth()]}`
-}
-// Pickup days → "Daily" / "Mon–Sat" / "Mon, Wed, Fri". Empty = every day.
-const WEEK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const fmtPickupDays = (days) => {
-  if (!Array.isArray(days) || !days.length) return 'Daily'
-  const set = new Set(days)
-  if (WEEK.every(d => set.has(d))) return 'Daily'
-  if (set.size === 6 && !set.has('Sun')) return 'Mon–Sat'
-  return WEEK.filter(d => set.has(d)).join(', ')
 }
 // Year-inclusive label for the date chips, e.g. "17 Jun 2026".
 const fmtDateY = (d) => {
@@ -1768,6 +1760,7 @@ export default function ConsignmentOverview() {
                         onClick={() => handleSort('branch_name')}>
                       Branch <SortIcon col="branch_name" />
                     </th>
+                    {isOutside && <th style={{ ...thBase, textAlign: 'left' }}>BVC Pickup</th>}
                     <th style={{ ...thBase, textAlign: 'center', cursor: 'pointer', color: sortKey === 'total_bills' ? t.gold : t.text4 }}
                         onClick={() => handleSort('total_bills')}
                         title="Today's bills + pending bills currently at this branch">
@@ -1811,7 +1804,6 @@ export default function ConsignmentOverview() {
                         onClick={() => handleSort('last_moved_days_ago')}>
                       Last Moved <SortIcon col="last_moved_days_ago" />
                     </th>
-                    <th style={{ ...thBase, textAlign: 'center' }}>BVC Pickup</th>
                     </>)}
 
                     <th style={{ ...thBase, textAlign: 'center' }}>Move</th>
@@ -1825,6 +1817,8 @@ export default function ConsignmentOverview() {
                     <td style={{ padding: '8px 8px 8px 7px', fontSize: '11px', color: t.text2, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', background: `${t.gold}14`, whiteSpace: 'nowrap' }}>
                       Σ Totals · {filtered.length}
                     </td>
+                    {/* BVC Pickup filler — outside only */}
+                    {isOutside && <td style={{ padding: '10px 9px', background: `${t.gold}14` }} />}
                     {/* Total Bills */}
                     <td style={{ padding: '10px 9px', textAlign: 'center', fontSize: '15px', color: t.gold, fontFamily: 'monospace', fontWeight: 700, background: `${t.gold}14` }}>
                       {(grandToday + grandOlder) || '—'}
@@ -1849,7 +1843,7 @@ export default function ConsignmentOverview() {
                       {fmt(grandOlderWt, 2)}<span style={{ fontSize: '11px', marginLeft: '2px' }}>g</span>
                     </td>
                     {/* Oldest + Last Moved filler — outside only */}
-                    {isOutside && <td colSpan={3} style={{ padding: '10px 9px', background: `${t.gold}14` }} />}
+                    {isOutside && <td colSpan={2} style={{ padding: '10px 9px', background: `${t.gold}14` }} />}
                     {/* Move filler — all tabs */}
                     <td style={{ padding: '10px 9px', background: `${t.gold}14` }} />
                   </tr>
@@ -1903,6 +1897,22 @@ export default function ConsignmentOverview() {
                           <div className="cstock-branch-name" style={{ color: t.text1 }}>{b.branch_name}</div>
                           <div className="cstock-branch-region" style={{ color: rColor }}>{b.region}</div>
                         </td>
+
+                        {/* BVC Pickup — same chips as Booking Volume (time + days),
+                            from Admin → Logistics. A non-BVC partner is named. */}
+                        {isOutside && (
+                          <td style={{ padding: tdPad }}>
+                            {b.pickup_time || (Array.isArray(b.pickup_days) && b.pickup_days.length) ? (
+                              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                                <PickupTimeChip t={t} time={b.pickup_time} />
+                                <PickupDaysChip t={t} days={b.pickup_days} />
+                              </div>
+                            ) : <span style={{ fontSize: '12.5px', color: t.text4 }}>—</span>}
+                            {b.logistics_partner && !/bvc/i.test(b.logistics_partner) && (
+                              <div style={{ fontSize: '10.5px', color: t.text4, marginTop: 4 }}>{b.logistics_partner}</div>
+                            )}
+                          </td>
+                        )}
 
                         {/* Total Bills */}
                         {(() => {
@@ -1974,28 +1984,6 @@ export default function ConsignmentOverview() {
                             <div style={{ fontSize: '11px', color: t.text4, marginTop: '3px' }}>{fmtTsDate(b.last_moved_at)}</div>
                           )}
                         </td>
-                        {/* BVC Pickup — schedule from Admin → Logistics. A branch on
-                            another partner shows that partner's name instead. */}
-                        {(() => {
-                          const partner = (b.logistics_partner || '').trim()
-                          const isBvc   = !partner || /bvc/i.test(partner)
-                          const today   = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date(Date.now() + 5.5 * 3600000).getUTCDay()]
-                          const offToday = Array.isArray(b.pickup_days) && b.pickup_days.length > 0 && !b.pickup_days.includes(today)
-                          return (
-                            <td style={{ padding: tdPad, textAlign: 'center' }}>
-                              {b.pickup_time ? (
-                                <span style={{ fontSize: '12.5px', color: offToday ? t.text4 : t.text1, background: offToday ? 'transparent' : `${t.gold}12`, border: `1px solid ${offToday ? t.border : `${t.gold}40`}`, borderRadius: '5px', padding: '2px 8px', fontWeight: 600, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                                  {String(b.pickup_time).slice(0, 5)}
-                                </span>
-                              ) : <span style={{ fontSize: '12.5px', color: t.text4 }}>—</span>}
-                              {(b.pickup_time || !isBvc) && (
-                                <div style={{ fontSize: '11px', color: t.text4, marginTop: '3px', whiteSpace: 'nowrap' }}>
-                                  {[!isBvc && partner, fmtPickupDays(b.pickup_days), offToday && 'no pickup today'].filter(Boolean).join(' · ')}
-                                </div>
-                              )}
-                            </td>
-                          )
-                        })()}
                         </>)}
 
                         {/* Move — all tabs. Deep-links into Consignment Data for this
