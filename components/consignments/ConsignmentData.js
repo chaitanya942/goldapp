@@ -1181,7 +1181,24 @@ export default function ConsignmentData() {
                   // pulled for operators who never create a consignment.
                   authedFetch('/api/branch-employees')
                     .then(r => r.json())
-                    .then(d => setBranchEmps(Array.isArray(d?.employees) ? d.employees : []))
+                    .then(d => {
+                      const emps = Array.isArray(d?.employees) ? d.employees : []
+                      setBranchEmps(emps)
+                      // Default Branch Contact = the source branch's manager from
+                      // the directory (is_manager, else a "Branch Manager" title);
+                      // with several, prefer the branch's configured contact. No
+                      // manager on file → keep the branch default seeded above.
+                      const target = (nav?.branch || '').trim().toLowerCase()
+                      const mine = emps.filter(e => e.name && (e.crm_branch_name || '').trim().toLowerCase() === target)
+                      let mgrs = mine.filter(e => e.is_manager)
+                      if (!mgrs.length) mgrs = mine.filter(e => /^(senior )?branch manager/i.test(e.designation || ''))
+                      const cp  = (br?.contact_person || '').trim().toLowerCase()
+                      const mgr = mgrs.find(e => cp && e.name.trim().toLowerCase() === cp) || mgrs[0]
+                      if (mgr) {
+                        setBranchContactName(mgr.name)
+                        setBranchContactPhone(mgr.contact_phone || mgr.mobile_phone || br?.contact_phone || '')
+                      }
+                    })
                     .catch(() => setBranchEmps([]))   // fields stay free-text
                   setShowModal(true)
                   fetchPreviewNumbers()
@@ -2524,6 +2541,17 @@ export default function ConsignmentData() {
                       />
                     </div>
                   </div>}
+                  {!showBranchContact && (branchContactName || branchContactPhone) && (
+                    <div>
+                      <div style={{ fontSize: '9px', color: t.text4, letterSpacing: '.12em', textTransform: 'uppercase', marginBottom: '6px', fontWeight: 700 }}>
+                        Branch Contact <span style={{ textTransform: 'none', fontWeight: 400, color: t.text4 }}>(prints on {moveType === 'INTERNAL' ? 'Issue Voucher' : 'Delivery Challan'})</span>
+                      </div>
+                      <div style={{ fontSize: '13px', color: t.text2 }}>
+                        {branchContactName || '—'}
+                        {branchContactPhone && <span style={{ color: t.text3, fontFamily: 'monospace', marginLeft: '10px' }}>{branchContactPhone}</span>}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Destination Contact — record-keeping only, does NOT print
                       on the Issue Voucher / Delivery Challan (unlike Branch
